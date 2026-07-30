@@ -78,6 +78,7 @@ ISVehicleDashboard.RADIO_VALUE_PRESET_WRITE_NAME = ISVehicleDashboard.RADIO_VALU
 
 -- LCD style
 ISVehicleDashboard.RADIO_VALUE_TEXT_FONT = ISVehicleDashboard.RADIO_VALUE_TEXT_FONT or UIFont.Small
+ISVehicleDashboard.RADIO_VALUE_TEXT_FONT_LARGE = ISVehicleDashboard.RADIO_VALUE_TEXT_FONT_LARGE or UIFont.Large
 ISVehicleDashboard.RADIO_VALUE_TEXT_A = ISVehicleDashboard.RADIO_VALUE_TEXT_A or 0.95
 ISVehicleDashboard.RADIO_VALUE_TEXT_RGB = ISVehicleDashboard.RADIO_VALUE_TEXT_RGB or { r=0.22, g=0.20, b=0.1 }
 ISVehicleDashboard.RADIO_VALUE_LCD_SCALE = ISVehicleDashboard.RADIO_VALUE_LCD_SCALE or 1.0
@@ -85,6 +86,53 @@ ISVehicleDashboard.RADIO_VALUE_LCD_SCALE = ISVehicleDashboard.RADIO_VALUE_LCD_SC
 -- SET timeout
 ISVehicleDashboard.RADIO_VALUE_SET_TIMEOUT_S = ISVehicleDashboard.RADIO_VALUE_SET_TIMEOUT_S or 10.0
 
+-- =========================================================
+-- Large (2x) offsets (RAW numbers, easy to tune later)
+-- =========================================================
+ISVehicleDashboard.RADIO_VALUE_UI_X_LARGE = ISVehicleDashboard.RADIO_VALUE_UI_X_LARGE or 1210
+ISVehicleDashboard.RADIO_VALUE_UI_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_UI_Y_LARGE or 114
+
+ISVehicleDashboard.RADIO_VALUE_POWER_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_POWER_OFF_X_LARGE or 38
+ISVehicleDashboard.RADIO_VALUE_POWER_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_POWER_OFF_Y_LARGE or 38
+
+ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_X_LARGE or 22
+ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_Y_LARGE or 72
+
+ISVehicleDashboard.RADIO_VALUE_VOL_UP_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_VOL_UP_OFF_X_LARGE or 22
+ISVehicleDashboard.RADIO_VALUE_VOL_UP_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_VOL_UP_OFF_Y_LARGE or 6
+
+ISVehicleDashboard.RADIO_VALUE_SET_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_SET_OFF_X_LARGE or 326
+ISVehicleDashboard.RADIO_VALUE_SET_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_SET_OFF_Y_LARGE or 76
+
+ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_X_LARGE or 72
+ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_Y_LARGE or 22
+
+ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_X_LARGE or 6
+ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_Y_LARGE or 22
+
+ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_X_LARGE or 256
+ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_Y_LARGE or 76
+
+ISVehicleDashboard.RADIO_VALUE_CH1_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_CH1_OFF_X_LARGE or 252
+ISVehicleDashboard.RADIO_VALUE_CH1_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_CH1_OFF_Y_LARGE or 18
+ISVehicleDashboard.RADIO_VALUE_CH2_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_CH2_OFF_X_LARGE or 296
+ISVehicleDashboard.RADIO_VALUE_CH2_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_CH2_OFF_Y_LARGE or 18
+ISVehicleDashboard.RADIO_VALUE_CH3_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_CH3_OFF_X_LARGE or 340
+ISVehicleDashboard.RADIO_VALUE_CH3_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_CH3_OFF_Y_LARGE or 18
+ISVehicleDashboard.RADIO_VALUE_CH4_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_CH4_OFF_X_LARGE or 252
+ISVehicleDashboard.RADIO_VALUE_CH4_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_CH4_OFF_Y_LARGE or 46
+ISVehicleDashboard.RADIO_VALUE_CH5_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_CH5_OFF_X_LARGE or 296
+ISVehicleDashboard.RADIO_VALUE_CH5_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_CH5_OFF_Y_LARGE or 46
+ISVehicleDashboard.RADIO_VALUE_CH6_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_CH6_OFF_X_LARGE or 340
+ISVehicleDashboard.RADIO_VALUE_CH6_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_CH6_OFF_Y_LARGE or 46
+
+ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_X_LARGE  = ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_X_LARGE  or 124
+ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_Y_LARGE  = ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_Y_LARGE  or 38
+ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_X_LARGE = ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_X_LARGE or -152
+ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_Y_LARGE or 38
+
+ISVehicleDashboard.RADIO_VALUE_TEXT_SET_X_LARGE  = ISVehicleDashboard.RADIO_VALUE_TEXT_SET_X_LARGE  or 0
+ISVehicleDashboard.RADIO_VALUE_TEXT_SET_Y_LARGE  = ISVehicleDashboard.RADIO_VALUE_TEXT_SET_Y_LARGE  or 38
 
 -- =========================================================
 -- Helpers
@@ -94,6 +142,14 @@ local function clamp(v, a, b)
     if v > b then return b end
     return v
 end
+
+local function ydTex(path)
+    if YourDash and YourDash.GetTexture then
+        return YourDash.GetTexture(path)
+    end
+    return getTexture(path)
+end
+
 -- Single-player pause lock (MP unaffected)
 local function _ydIsPausedSP()
     return (not isClient()) and (getGameSpeed and getGameSpeed() == 0)
@@ -515,29 +571,36 @@ end
 -- Build UI
 -- =========================================================
 function ISVehicleDashboard:_ensureValueRadioControls()
-    if self.__radioValueControlsReady then return end
+    local wantLarge = (YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures()) == true
+
+    -- Rebuild/retarget textures if pack changed
+    if self.__radioValueControlsReady and (self.__radioValuePackLarge == wantLarge) then
+        return
+    end
     self.__radioValueControlsReady = true
+    self.__radioValuePackLarge = wantLarge
 
     local base = "media/ui/vehicles/radio_value/"
 
-    self.__rv_bg_off   = getTexture(base .. "radio_background_off.png")
-    self.__rv_bg_on    = getTexture(base .. "radio_background_on.png") or self.__rv_bg_off
+    -- Load textures (Large->Regular fallback handled by ydTex/YourDash.GetTexture)
+    self.__rv_bg_off    = ydTex(base .. "radio_background_off.png")
+    self.__rv_bg_on     = ydTex(base .. "radio_background_on.png") or self.__rv_bg_off
 
-    self.__rv_pwr_btn  = getTexture(base .. "radio_power_btn.png")
-    self.__rv_vol_up   = getTexture(base .. "radio_vol_up.png")
-    self.__rv_vol_down = getTexture(base .. "radio_vol_down.png")
-    self.__rv_set_btn  = getTexture(base .. "radio_set_btn.png")
-    self.__rv_freq_up   = getTexture(base .. "radio_freq_up.png")
-    self.__rv_freq_down = getTexture(base .. "radio_freq_down.png")
-    self.__rv_mute_btn  = getTexture(base .. "radio_pause.png") -- reuse pause texture as mute
+    self.__rv_pwr_btn   = ydTex(base .. "radio_power_btn.png")
+    self.__rv_vol_up    = ydTex(base .. "radio_vol_up.png")
+    self.__rv_vol_down  = ydTex(base .. "radio_vol_down.png")
+    self.__rv_set_btn   = ydTex(base .. "radio_set_btn.png")
+    self.__rv_freq_up   = ydTex(base .. "radio_freq_up.png")
+    self.__rv_freq_down = ydTex(base .. "radio_freq_down.png")
+    self.__rv_mute_btn  = ydTex(base .. "radio_pause.png") -- reuse pause texture as mute
 
-    self.__rv_chan = self.__rv_chan or {
-        getTexture(base .. "radio_chan_1.png"),
-        getTexture(base .. "radio_chan_2.png"),
-        getTexture(base .. "radio_chan_3.png"),
-        getTexture(base .. "radio_chan_4.png"),
-        getTexture(base .. "radio_chan_5.png"),
-        getTexture(base .. "radio_chan_6.png"),
+    self.__rv_chan = {
+        ydTex(base .. "radio_chan_1.png"),
+        ydTex(base .. "radio_chan_2.png"),
+        ydTex(base .. "radio_chan_3.png"),
+        ydTex(base .. "radio_chan_4.png"),
+        ydTex(base .. "radio_chan_5.png"),
+        ydTex(base .. "radio_chan_6.png"),
     }
 
     -- Background + text renderer
@@ -560,14 +623,37 @@ function ISVehicleDashboard:_ensureValueRadioControls()
             local dash = self.target
             if not dash then return end
 
-            local font = dash.RADIO_VALUE_TEXT_FONT or UIFont.Small
+            local useLarge = (dash.__radioValuePackLarge == true)
+            local function pick(reg, large, def)
+                if useLarge then
+                    if large ~= nil then return large end
+                    if reg   ~= nil then return reg end
+                    return def
+                else
+                    if reg   ~= nil then return reg end
+                    if large ~= nil then return large end
+                    return def
+                end
+            end
+
+            local font = useLarge
+                and (dash.RADIO_VALUE_TEXT_FONT_LARGE or dash.RADIO_VALUE_TEXT_FONT or UIFont.Large)
+                or  (dash.RADIO_VALUE_TEXT_FONT or UIFont.Small)
             local rgb  = dash.RADIO_VALUE_TEXT_RGB or { r=1, g=1, b=1 }
             local a    = dash.RADIO_VALUE_TEXT_A   or 0.95
 
+            local VOL_X  = pick(dash.RADIO_VALUE_TEXT_VOL_X,  dash.RADIO_VALUE_TEXT_VOL_X_LARGE,  0)
+            local VOL_Y  = pick(dash.RADIO_VALUE_TEXT_VOL_Y,  dash.RADIO_VALUE_TEXT_VOL_Y_LARGE,  0)
+            local FREQ_X = pick(dash.RADIO_VALUE_TEXT_FREQ_X, dash.RADIO_VALUE_TEXT_FREQ_X_LARGE, 0)
+            local FREQ_Y = pick(dash.RADIO_VALUE_TEXT_FREQ_Y, dash.RADIO_VALUE_TEXT_FREQ_Y_LARGE, 0)
+
+            local SET_X  = pick(dash.RADIO_VALUE_TEXT_SET_X,  dash.RADIO_VALUE_TEXT_SET_X_LARGE,  0)
+            local SET_Y  = pick(dash.RADIO_VALUE_TEXT_SET_Y,  dash.RADIO_VALUE_TEXT_SET_Y_LARGE,  0)
+
             if dash.__radioValueSetArmed == true then
                 self:drawTextCentre("set?",
-                    (self.width * 0.5) + (dash.RADIO_VALUE_TEXT_SET_X or 0),
-                    (dash.RADIO_VALUE_TEXT_SET_Y or 0),
+                    (self.width * 0.5) + (SET_X or 0),
+                    (SET_Y or 0),
                     rgb.r, rgb.g, rgb.b, a, font
                 )
                 return
@@ -578,16 +664,16 @@ function ISVehicleDashboard:_ensureValueRadioControls()
 
             if left ~= "" then
                 self:drawText(left,
-                    (dash.RADIO_VALUE_TEXT_VOL_X or 0),
-                    (dash.RADIO_VALUE_TEXT_VOL_Y or 0),
+                    VOL_X,
+                    VOL_Y,
                     rgb.r, rgb.g, rgb.b, a, font
                 )
             end
 
             if right ~= "" then
                 self:drawTextRight(right,
-                    self.width + (dash.RADIO_VALUE_TEXT_FREQ_X or 0),
-                    (dash.RADIO_VALUE_TEXT_FREQ_Y or 0),
+                    self.width + (FREQ_X or 0),
+                    FREQ_Y,
                     rgb.r, rgb.g, rgb.b, a, font
                 )
             end
@@ -635,15 +721,14 @@ function ISVehicleDashboard:_ensureValueRadioControls()
         img.backgroundColor = { r=0, g=0, b=0, a=0 }
         img.alpha = 1
 
-    function img:onMouseDown(x, y)
-        local dash = self.target
-        if not dash or self.__disabled then return false end
-        if _ydIsPausedSP() then return false end
-        dash:_radioValueBeginFreqHold(dir)
-        self:setCapture(true)
-        return true
-    end
-
+        function img:onMouseDown(x, y)
+            local dash = self.target
+            if not dash or self.__disabled then return false end
+            if _ydIsPausedSP() then return false end
+            dash:_radioValueBeginFreqHold(dir)
+            self:setCapture(true)
+            return true
+        end
 
         local function endHold(selfBtn)
             local dash = selfBtn.target
@@ -701,7 +786,28 @@ function ISVehicleDashboard:_ensureValueRadioControls()
             end
         end
     end
+
+    -- Retarget existing UI textures/sizes (so hot-swap works)
+    if self.valueRadioBG and self.__rv_bg_off then
+        setImageTextureAndSize(self, self.valueRadioBG, self.__rv_bg_off)
+    end
+    if self.valueRadioPowerBtn and self.__rv_pwr_btn then setImageTextureAndSize(self, self.valueRadioPowerBtn, self.__rv_pwr_btn) end
+    if self.valueRadioVolUpBtn and self.__rv_vol_up then setImageTextureAndSize(self, self.valueRadioVolUpBtn, self.__rv_vol_up) end
+    if self.valueRadioVolDownBtn and self.__rv_vol_down then setImageTextureAndSize(self, self.valueRadioVolDownBtn, self.__rv_vol_down) end
+    if self.valueRadioSetBtn and self.__rv_set_btn then setImageTextureAndSize(self, self.valueRadioSetBtn, self.__rv_set_btn) end
+    if self.valueRadioMuteBtn and self.__rv_mute_btn then setImageTextureAndSize(self, self.valueRadioMuteBtn, self.__rv_mute_btn) end
+    if self.valueRadioFreqUpBtn and self.__rv_freq_up then setImageTextureAndSize(self, self.valueRadioFreqUpBtn, self.__rv_freq_up) end
+    if self.valueRadioFreqDownBtn and self.__rv_freq_down then setImageTextureAndSize(self, self.valueRadioFreqDownBtn, self.__rv_freq_down) end
+
+    if self.valueRadioChanBtn and self.__rv_chan then
+        for i = 1, 6 do
+            if self.valueRadioChanBtn[i] and self.__rv_chan[i] then
+                setImageTextureAndSize(self, self.valueRadioChanBtn[i], self.__rv_chan[i])
+            end
+        end
+    end
 end
+
 
 
 -- =========================================================
@@ -712,8 +818,24 @@ function ISVehicleDashboard:_positionValueRadioControls()
     self:_ensureValueRadioControls()
     if not self.valueRadioBG then return end
 
-    local bx = self.backgroundTex:getX() + (self.RADIO_VALUE_UI_X or 0)
-    local by = self.backgroundTex:getY() + (self.RADIO_VALUE_UI_Y or 0)
+    local useLarge = (self.__radioValuePackLarge == true)
+    local function pick(reg, large, def)
+        if useLarge then
+            if large ~= nil then return large end
+            if reg   ~= nil then return reg end
+            return def
+        else
+            if reg   ~= nil then return reg end
+            if large ~= nil then return large end
+            return def
+        end
+    end
+
+    local UI_X = pick(self.RADIO_VALUE_UI_X, self.RADIO_VALUE_UI_X_LARGE, 0)
+    local UI_Y = pick(self.RADIO_VALUE_UI_Y, self.RADIO_VALUE_UI_Y_LARGE, 0)
+
+    local bx = self.backgroundTex:getX() + UI_X
+    local by = self.backgroundTex:getY() + UI_Y
 
     self.valueRadioBG:setX(bx)
     self.valueRadioBG:setY(by)
@@ -724,23 +846,63 @@ function ISVehicleDashboard:_positionValueRadioControls()
         img:setY(by + (oy or 0))
     end
 
-    place(self.valueRadioPowerBtn,   self.RADIO_VALUE_POWER_OFF_X,     self.RADIO_VALUE_POWER_OFF_Y)
-    place(self.valueRadioVolDownBtn, self.RADIO_VALUE_VOL_DOWN_OFF_X,  self.RADIO_VALUE_VOL_DOWN_OFF_Y)
-    place(self.valueRadioVolUpBtn,   self.RADIO_VALUE_VOL_UP_OFF_X,    self.RADIO_VALUE_VOL_UP_OFF_Y)
-    place(self.valueRadioSetBtn,     self.RADIO_VALUE_SET_OFF_X,       self.RADIO_VALUE_SET_OFF_Y)
-    place(self.valueRadioFreqUpBtn,  self.RADIO_VALUE_FREQ_UP_OFF_X,   self.RADIO_VALUE_FREQ_UP_OFF_Y)
-    place(self.valueRadioFreqDownBtn,self.RADIO_VALUE_FREQ_DOWN_OFF_X, self.RADIO_VALUE_FREQ_DOWN_OFF_Y)
-    place(self.valueRadioMuteBtn,    self.RADIO_VALUE_MUTE_OFF_X,      self.RADIO_VALUE_MUTE_OFF_Y)
+    place(self.valueRadioPowerBtn,
+        pick(self.RADIO_VALUE_POWER_OFF_X, self.RADIO_VALUE_POWER_OFF_X_LARGE),
+        pick(self.RADIO_VALUE_POWER_OFF_Y, self.RADIO_VALUE_POWER_OFF_Y_LARGE)
+    )
+    place(self.valueRadioVolDownBtn,
+        pick(self.RADIO_VALUE_VOL_DOWN_OFF_X, self.RADIO_VALUE_VOL_DOWN_OFF_X_LARGE),
+        pick(self.RADIO_VALUE_VOL_DOWN_OFF_Y, self.RADIO_VALUE_VOL_DOWN_OFF_Y_LARGE)
+    )
+    place(self.valueRadioVolUpBtn,
+        pick(self.RADIO_VALUE_VOL_UP_OFF_X, self.RADIO_VALUE_VOL_UP_OFF_X_LARGE),
+        pick(self.RADIO_VALUE_VOL_UP_OFF_Y, self.RADIO_VALUE_VOL_UP_OFF_Y_LARGE)
+    )
+    place(self.valueRadioSetBtn,
+        pick(self.RADIO_VALUE_SET_OFF_X, self.RADIO_VALUE_SET_OFF_X_LARGE),
+        pick(self.RADIO_VALUE_SET_OFF_Y, self.RADIO_VALUE_SET_OFF_Y_LARGE)
+    )
+    place(self.valueRadioFreqUpBtn,
+        pick(self.RADIO_VALUE_FREQ_UP_OFF_X, self.RADIO_VALUE_FREQ_UP_OFF_X_LARGE),
+        pick(self.RADIO_VALUE_FREQ_UP_OFF_Y, self.RADIO_VALUE_FREQ_UP_OFF_Y_LARGE)
+    )
+    place(self.valueRadioFreqDownBtn,
+        pick(self.RADIO_VALUE_FREQ_DOWN_OFF_X, self.RADIO_VALUE_FREQ_DOWN_OFF_X_LARGE),
+        pick(self.RADIO_VALUE_FREQ_DOWN_OFF_Y, self.RADIO_VALUE_FREQ_DOWN_OFF_Y_LARGE)
+    )
+    place(self.valueRadioMuteBtn,
+        pick(self.RADIO_VALUE_MUTE_OFF_X, self.RADIO_VALUE_MUTE_OFF_X_LARGE),
+        pick(self.RADIO_VALUE_MUTE_OFF_Y, self.RADIO_VALUE_MUTE_OFF_Y_LARGE)
+    )
 
     if self.valueRadioChanBtn then
-        place(self.valueRadioChanBtn[1], self.RADIO_VALUE_CH1_OFF_X, self.RADIO_VALUE_CH1_OFF_Y)
-        place(self.valueRadioChanBtn[2], self.RADIO_VALUE_CH2_OFF_X, self.RADIO_VALUE_CH2_OFF_Y)
-        place(self.valueRadioChanBtn[3], self.RADIO_VALUE_CH3_OFF_X, self.RADIO_VALUE_CH3_OFF_Y)
-        place(self.valueRadioChanBtn[4], self.RADIO_VALUE_CH4_OFF_X, self.RADIO_VALUE_CH4_OFF_Y)
-        place(self.valueRadioChanBtn[5], self.RADIO_VALUE_CH5_OFF_X, self.RADIO_VALUE_CH5_OFF_Y)
-        place(self.valueRadioChanBtn[6], self.RADIO_VALUE_CH6_OFF_X, self.RADIO_VALUE_CH6_OFF_Y)
+        place(self.valueRadioChanBtn[1],
+            pick(self.RADIO_VALUE_CH1_OFF_X, self.RADIO_VALUE_CH1_OFF_X_LARGE),
+            pick(self.RADIO_VALUE_CH1_OFF_Y, self.RADIO_VALUE_CH1_OFF_Y_LARGE)
+        )
+        place(self.valueRadioChanBtn[2],
+            pick(self.RADIO_VALUE_CH2_OFF_X, self.RADIO_VALUE_CH2_OFF_X_LARGE),
+            pick(self.RADIO_VALUE_CH2_OFF_Y, self.RADIO_VALUE_CH2_OFF_Y_LARGE)
+        )
+        place(self.valueRadioChanBtn[3],
+            pick(self.RADIO_VALUE_CH3_OFF_X, self.RADIO_VALUE_CH3_OFF_X_LARGE),
+            pick(self.RADIO_VALUE_CH3_OFF_Y, self.RADIO_VALUE_CH3_OFF_Y_LARGE)
+        )
+        place(self.valueRadioChanBtn[4],
+            pick(self.RADIO_VALUE_CH4_OFF_X, self.RADIO_VALUE_CH4_OFF_X_LARGE),
+            pick(self.RADIO_VALUE_CH4_OFF_Y, self.RADIO_VALUE_CH4_OFF_Y_LARGE)
+        )
+        place(self.valueRadioChanBtn[5],
+            pick(self.RADIO_VALUE_CH5_OFF_X, self.RADIO_VALUE_CH5_OFF_X_LARGE),
+            pick(self.RADIO_VALUE_CH5_OFF_Y, self.RADIO_VALUE_CH5_OFF_Y_LARGE)
+        )
+        place(self.valueRadioChanBtn[6],
+            pick(self.RADIO_VALUE_CH6_OFF_X, self.RADIO_VALUE_CH6_OFF_X_LARGE),
+            pick(self.RADIO_VALUE_CH6_OFF_Y, self.RADIO_VALUE_CH6_OFF_Y_LARGE)
+        )
     end
 end
+
 
 
 -- =========================================================

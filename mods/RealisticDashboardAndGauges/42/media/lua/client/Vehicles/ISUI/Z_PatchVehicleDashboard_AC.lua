@@ -19,6 +19,12 @@ ISVehicleDashboard.AC_SLIDER_TRAVEL = ISVehicleDashboard.AC_SLIDER_TRAVEL or 127
 ISVehicleDashboard.AC_FAN_X         = ISVehicleDashboard.AC_FAN_X         or 653
 ISVehicleDashboard.AC_FAN_Y         = ISVehicleDashboard.AC_FAN_Y         or 125
 
+-- 2x ("large") offsets (RAW numbers, easy to tune later)
+ISVehicleDashboard.AC_SLIDER_X_LARGE      = ISVehicleDashboard.AC_SLIDER_X_LARGE      or 1366
+ISVehicleDashboard.AC_SLIDER_Y_LARGE      = ISVehicleDashboard.AC_SLIDER_Y_LARGE      or 264
+ISVehicleDashboard.AC_SLIDER_TRAVEL_LARGE = ISVehicleDashboard.AC_SLIDER_TRAVEL_LARGE or 254
+ISVehicleDashboard.AC_FAN_X_LARGE         = ISVehicleDashboard.AC_FAN_X_LARGE         or 1307
+ISVehicleDashboard.AC_FAN_Y_LARGE         = ISVehicleDashboard.AC_FAN_Y_LARGE         or 249
 
 -- =========================
 -- Helpers
@@ -27,6 +33,35 @@ local function clamp(v, a, b)
     if v < a then return a end
     if v > b then return b end
     return v
+end
+local function _ydWantLarge()
+    return (YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures()) == true
+end
+
+local function _ydToLargePath(path)
+    if YourDash and YourDash._toLargePath then
+        return YourDash._toLargePath(path)
+    end
+    if not path then return nil end
+    if string.find(path, "/large/", 1, true) then return path end
+    return (string.gsub(path, "(.*/)([^/]+)$", "%1large/%2"))
+end
+
+-- returns (tex, usedLargeFile)
+local function _ydGetTexWithFlag(path, wantLarge)
+    if wantLarge then
+        local lp = _ydToLargePath(path)
+        local t = lp and getTexture(lp) or nil
+        if t then return t, true end
+    end
+    local t = getTexture(path)
+    return t, false
+end
+
+local function _ydScaleIfFallback(wantLarge, usedLargeFile)
+    -- If Large pack selected but we fell back to regular file, auto scale 2x
+    if wantLarge and (usedLargeFile ~= true) then return 2 end
+    return 1
 end
 
 local function nearestIndex(levels, value)
@@ -41,16 +76,24 @@ local function nearestIndex(levels, value)
     return bestI
 end
 
-local function setImageTextureAndSize(dash, img, tex)
+local function setImageTextureAndSize(dash, img, tex, scale)
     if not img or not tex then return end
-    if dash and dash._setImageTextureAndSize then
+    local s = scale or 1
+
+    -- If we don't need scaling, prefer your dashboard helper (keeps behavior consistent)
+    if dash and dash._setImageTextureAndSize and (s == 1) then
         dash:_setImageTextureAndSize(img, tex)
         return
     end
+
     img.texture = tex
-    if img.setWidth and tex.getWidthOrig then img:setWidth(tex:getWidthOrig()) end
-    if img.setHeight and tex.getHeightOrig then img:setHeight(tex:getHeightOrig()) end
+
+    local w = tex.getWidthOrig and tex:getWidthOrig() or img.width
+    local h = tex.getHeightOrig and tex:getHeightOrig() or img.height
+    if img.setWidth and w then img:setWidth(w * s) end
+    if img.setHeight and h then img:setHeight(h * s) end
 end
+
 
 local function installPressedEffectFallback(img, pressedScale)
     if not img or img.__pressedEffectInstalled then return end
@@ -217,17 +260,36 @@ end
 -- Build UI
 -- =========================
 function ISVehicleDashboard:_ensureACControls()
-    if self.__acControlsReady then return end
-    self.__acControlsReady = true
+    local wantLarge = _ydWantLarge()
 
-    -- Textures
-    self.__fan_off     = getTexture("media/ui/vehicles/fan_off.png")
-    self.__fan_on      = getTexture("media/ui/vehicles/fan_on.png") or self.__fan_off
-    self.__temp_slider = getTexture("media/ui/vehicles/temp_slider.png")
+    -- Rebuild/retarget textures if pack changed
+    if self.__acControlsReady and (self.__acPackLarge == wantLarge) then
+        return
+    end
+    self.__acControlsReady = true
+    self.__acPackLarge = wantLarge
+
+    -- Textures (try /large/, else fallback)
+    local fanOff, fanOffLarge = _ydGetTexWithFlag("media/ui/vehicles/fan_off.png", wantLarge)
+    local fanOn,  fanOnLarge  = _ydGetTexWithFlag("media/ui/vehicles/fan_on.png",  wantLarge)
+    local knob,   knobLarge   = _ydGetTexWithFlag("media/ui/vehicles/temp_slider.png", wantLarge)
+
+    self.__fan_off = fanOff
+    self.__fan_on  = fanOn or fanOff
+    self.__temp_slider = knob
+
+    self.__fan_off_isLarge = (fanOffLarge == true)
+    self.__fan_on_isLarge  = (fanOnLarge  == true) or (fanOffLarge == true) -- if fan_on missing, treat like off
+    self.__temp_slider_isLarge = (knobLarge == true)
+
+    -- Per-texture UI scaling if we fell back
+    local fanOffScale = _ydScaleIfFallback(wantLarge, self.__fan_off_isLarge)
+    local fanOnScale  = _ydScaleIfFallback(wantLarge, self.__fan_on_isLarge)
+    local knobScale   = _ydScaleIfFallback(wantLarge, self.__temp_slider_isLarge)
 
     -- Fan button reuses vanilla heaterTex slot
     if self.heaterTex and self.__fan_off then
-        setImageTextureAndSize(self, self.heaterTex, self.__fan_off)
+        setImageTextureAndSize(self, self.heaterTex, self.__fan_off, fanOffScale)
         self.heaterTex.target = self
         self.heaterTex.onclick = ISVehicleDashboard.onClickACFan
         self.heaterTex.backgroundColor = { r=0, g=0, b=0, a=0 }
@@ -240,57 +302,63 @@ function ISVehicleDashboard:_ensureACControls()
     end
 
     -- Slider knob (visible render, no tint)
-    if self.__temp_slider and not self.acTempSlider then
-        self.acTempSlider = ISImage:new(0, 0,
-            self.__temp_slider:getWidthOrig(),
-            self.__temp_slider:getHeightOrig(),
-            self.__temp_slider
-        )
-        self.acTempSlider:initialise()
-        self.acTempSlider:instantiate()
-        self.acTempSlider.target = self
-        self.acTempSlider.backgroundColor = { r=0, g=0, b=0, a=0 }
-        self.acTempSlider.alpha = 1
+    if self.__temp_slider then
+        if not self.acTempSlider then
+            self.acTempSlider = ISImage:new(0, 0,
+                (self.__temp_slider:getWidthOrig()  * knobScale),
+                (self.__temp_slider:getHeightOrig() * knobScale),
+                self.__temp_slider
+            )
+            self.acTempSlider:initialise()
+            self.acTempSlider:instantiate()
+            self.acTempSlider.target = self
+            self.acTempSlider.backgroundColor = { r=0, g=0, b=0, a=0 }
+            self.acTempSlider.alpha = 1
 
-        function self.acTempSlider:render()
-            if not self.texture then return end
-            self:drawTextureScaled(self.texture, 0, 0, self.width, self.height, self.alpha or 1)
+            function self.acTempSlider:render()
+                if not self.texture then return end
+                self:drawTextureScaled(self.texture, 0, 0, self.width, self.height, self.alpha or 1)
+            end
+
+            -- Make slider draggable
+            self.__acDragging = false
+
+            local function beginDrag(ui, x)
+                local dash = ui.target
+                if not dash then return false end
+                dash.__acDragging = true
+                ui:setCapture(true)
+                dash:_setACTempFromPointerX(ui:getX() + x, true)
+                return true
+            end
+
+            local function dragMove(ui)
+                local dash = ui.target
+                if not dash or not dash.__acDragging then return end
+                dash:_setACTempFromPointerX(ui:getX() + ui:getMouseX(), true)
+            end
+
+            local function endDrag(ui)
+                local dash = ui.target
+                if dash then dash.__acDragging = false end
+                ui:setCapture(false)
+                return true
+            end
+
+            function self.acTempSlider:onMouseDown(x, y) return beginDrag(self, x) end
+            function self.acTempSlider:onMouseMove(dx, dy) dragMove(self) end
+            function self.acTempSlider:onMouseMoveOutside(dx, dy) dragMove(self) end
+            function self.acTempSlider:onMouseUp(x, y) return endDrag(self) end
+            function self.acTempSlider:onMouseUpOutside(x, y) return endDrag(self) end
+
+            self:addChild(self.acTempSlider)
+        else
+            -- Hot-swap existing slider texture + size
+            setImageTextureAndSize(self, self.acTempSlider, self.__temp_slider, knobScale)
         end
-
-        -- Make slider draggable (hotspot removed; slider handles input)
-        self.__acDragging = false
-
-        local function beginDrag(ui, x)
-            local dash = ui.target
-            if not dash then return false end
-            dash.__acDragging = true
-            ui:setCapture(true)
-            dash:_setACTempFromPointerX(ui:getX() + x, true)
-            return true
-        end
-
-        local function dragMove(ui)
-            local dash = ui.target
-            if not dash or not dash.__acDragging then return end
-            dash:_setACTempFromPointerX(ui:getX() + ui:getMouseX(), true)
-        end
-
-        local function endDrag(ui)
-            local dash = ui.target
-            if dash then dash.__acDragging = false end
-            ui:setCapture(false)
-            return true
-        end
-
-        function self.acTempSlider:onMouseDown(x, y) return beginDrag(self, x) end
-        function self.acTempSlider:onMouseMove(dx, dy) dragMove(self) end
-        function self.acTempSlider:onMouseMoveOutside(dx, dy) dragMove(self) end
-        function self.acTempSlider:onMouseUp(x, y) return endDrag(self) end
-        function self.acTempSlider:onMouseUpOutside(x, y) return endDrag(self) end
-
-        self:addChild(self.acTempSlider)
     end
 end
+
 
 -- =========================
 -- Position UI
@@ -299,25 +367,42 @@ function ISVehicleDashboard:_positionACControls()
     if not self.backgroundTex then return end
     self:_ensureACControls()
 
-    if self.acTempSlider then
-        self.acTempSlider:setX(self.backgroundTex:getX() + self.AC_SLIDER_X)
-        self.acTempSlider:setY(self.backgroundTex:getY() + self.AC_SLIDER_Y)
+    local useLarge = (self.__acPackLarge == true)
+    local function pick(reg, large, def)
+        if useLarge then
+            if large ~= nil then return large end
+            if reg   ~= nil then return reg end
+            return def
+        else
+            if reg   ~= nil then return reg end
+            if large ~= nil then return large end
+            return def
+        end
     end
 
-    -- derive min/max from the above
+    local SLX = pick(self.AC_SLIDER_X,      self.AC_SLIDER_X_LARGE,      0)
+    local SLY = pick(self.AC_SLIDER_Y,      self.AC_SLIDER_Y_LARGE,      0)
+    local STR = pick(self.AC_SLIDER_TRAVEL, self.AC_SLIDER_TRAVEL_LARGE, 0)
+    local FX  = pick(self.AC_FAN_X,         self.AC_FAN_X_LARGE,         0)
+    local FY  = pick(self.AC_FAN_Y,         self.AC_FAN_Y_LARGE,         0)
+
     if self.acTempSlider then
-        self.__acMinX = self.backgroundTex:getX() + self.AC_SLIDER_X
-        self.__acMaxX = self.__acMinX + self.AC_SLIDER_TRAVEL
-        self.__acY    = self.backgroundTex:getY() + self.AC_SLIDER_Y
+        self.acTempSlider:setX(self.backgroundTex:getX() + SLX)
+        self.acTempSlider:setY(self.backgroundTex:getY() + SLY)
+
+        self.__acMinX = self.backgroundTex:getX() + SLX
+        self.__acMaxX = self.__acMinX + STR
+        self.__acY    = self.backgroundTex:getY() + SLY
 
         self:_updateACTempSliderPos()
     end
 
     if self.heaterTex then
-        self.heaterTex:setX(self.backgroundTex:getX() + self.AC_FAN_X)
-        self.heaterTex:setY(self.backgroundTex:getY() + self.AC_FAN_Y)
+        self.heaterTex:setX(self.backgroundTex:getX() + FX)
+        self.heaterTex:setY(self.backgroundTex:getY() + FY)
     end
 end
+
 
 -- =========================
 -- Update visuals each frame
@@ -353,9 +438,22 @@ function ISVehicleDashboard:_updateACControls()
             tex = self.__fan_off
         end
 
-        if self.heaterTex.texture ~= tex then
-            setImageTextureAndSize(self, self.heaterTex, tex)
+        local wantLarge = (self.__acPackLarge == true)
+        local usedLargeFile = false
+        if tex == self.__fan_on then
+            usedLargeFile = (self.__fan_on_isLarge == true)
+        else
+            usedLargeFile = (self.__fan_off_isLarge == true)
         end
+        local s = _ydScaleIfFallback(wantLarge, usedLargeFile)
+
+        if (self.heaterTex.texture ~= tex)
+            or (self.heaterTex.getWidth and tex.getWidthOrig and self.heaterTex:getWidth() ~= tex:getWidthOrig() * s)
+            or (self.heaterTex.getHeight and tex.getHeightOrig and self.heaterTex:getHeight() ~= tex:getHeightOrig() * s)
+        then
+            setImageTextureAndSize(self, self.heaterTex, tex, s)
+        end
+
 
         local canToggle = (self.vehicle:isEngineRunning() or self.vehicle:isKeysInIgnition())
         self.heaterTex.__disabled = not canToggle
@@ -381,6 +479,8 @@ function ISVehicleDashboard:_updateACControls()
         end
         self:_updateACTempSliderPos()
     end
+    -- Ensure offsets update when user switches texture pack
+    self:_positionACControls()
 end
 
 -- =========================

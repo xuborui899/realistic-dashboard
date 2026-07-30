@@ -4,6 +4,6 @@ author=LonelyDesperate
 description=Adds a realistic vehicle dashboard with functional gauges, warning lights, radio, and A/C integration, and immersive visual effects inspired by Project Zomboid settings.
 poster=poster.png
 icon=icon.png
-modversion=1.0.0
+modversion=1.1.0
 versionMin=42.0
 

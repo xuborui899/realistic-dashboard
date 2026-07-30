@@ -14,6 +14,47 @@ pcall(function() require "YourDash/Z_PatchVehicleDashboard_AC" end)
 if ISVehicleDashboard.__YourDashPassengerDashLoaded then return end
 ISVehicleDashboard.__YourDashPassengerDashLoaded = true
 
+-- =========================
+-- YourDash texture helper fallback (if driver file hasn't defined it yet)
+-- =========================
+YourDash = YourDash or {}
+
+if not YourDash.UseLargeTextures then
+    YourDash._useLargeTextures = YourDash._useLargeTextures or false
+    function YourDash.UseLargeTextures()
+        return YourDash._useLargeTextures == true
+    end
+end
+
+if not YourDash._toLargePath then
+    function YourDash._toLargePath(path)
+        if not path then return nil end
+        if string.find(path, "/large/", 1, true) then return path end
+        return (string.gsub(path, "(.*/)([^/]+)$", "%1large/%2"))
+    end
+end
+
+if not YourDash.GetTexture then
+    function YourDash.GetTexture(path, fallbackPath)
+        if not path then return nil end
+        if YourDash.UseLargeTextures() then
+            local lp = YourDash._toLargePath(path)
+            local t = lp and getTexture(lp) or nil
+            if t then return t end
+
+            if fallbackPath then
+                local lpf = YourDash._toLargePath(fallbackPath)
+                t = lpf and getTexture(lpf) or nil
+                if t then return t end
+            end
+        end
+
+        local t = getTexture(path)
+        if (not t) and fallbackPath then t = getTexture(fallbackPath) end
+        return t
+    end
+end
+
 -- =========================================================
 -- Passenger dash panel (separate UI, reuses ISVehicleDashboard helpers)
 -- =========================================================
@@ -69,6 +110,111 @@ YourDashPassengerDashboard.PAX_RADIO_VALUE_UI_Y = 30
 YourDashPassengerDashboard.PAX_TIP_RETRACT = "collapse passenger dash"
 YourDashPassengerDashboard.PAX_TIP_EXPAND  = "expand passenger dash"
 
+-- =========================
+-- 2x ("large") offsets (RAW numbers, easy to tune later)
+-- =========================
+YourDashPassengerDashboard.PAX_OFFSET_X_LARGE = YourDashPassengerDashboard.PAX_OFFSET_X_LARGE or 0
+YourDashPassengerDashboard.PAX_OFFSET_Y_LARGE = YourDashPassengerDashboard.PAX_OFFSET_Y_LARGE or 0
+
+YourDashPassengerDashboard.PAX_BAR_PAD_LARGE         = YourDashPassengerDashboard.PAX_BAR_PAD_LARGE         or 20
+YourDashPassengerDashboard.PAX_BAR_FALLBACK_H_LARGE  = YourDashPassengerDashboard.PAX_BAR_FALLBACK_H_LARGE  or 140
+
+YourDashPassengerDashboard.PAX_TOGGLE_X_LARGE = YourDashPassengerDashboard.PAX_TOGGLE_X_LARGE or 44
+YourDashPassengerDashboard.PAX_TOGGLE_Y_LARGE = YourDashPassengerDashboard.PAX_TOGGLE_Y_LARGE or 36
+
+YourDashPassengerDashboard.PAX_DOOR_X_LARGE   = YourDashPassengerDashboard.PAX_DOOR_X_LARGE   or 428
+YourDashPassengerDashboard.PAX_DOOR_Y_LARGE   = YourDashPassengerDashboard.PAX_DOOR_Y_LARGE   or 196
+YourDashPassengerDashboard.PAX_WINDOW_X_LARGE = YourDashPassengerDashboard.PAX_WINDOW_X_LARGE or 488
+YourDashPassengerDashboard.PAX_WINDOW_Y_LARGE = YourDashPassengerDashboard.PAX_WINDOW_Y_LARGE or 178
+
+YourDashPassengerDashboard.PAX_AC_FAN_X_LARGE         = YourDashPassengerDashboard.PAX_AC_FAN_X_LARGE         or 48
+YourDashPassengerDashboard.PAX_AC_FAN_Y_LARGE         = YourDashPassengerDashboard.PAX_AC_FAN_Y_LARGE         or 196
+YourDashPassengerDashboard.PAX_AC_SLIDER_X_LARGE      = YourDashPassengerDashboard.PAX_AC_SLIDER_X_LARGE      or 114
+YourDashPassengerDashboard.PAX_AC_SLIDER_Y_LARGE      = YourDashPassengerDashboard.PAX_AC_SLIDER_Y_LARGE      or 210
+YourDashPassengerDashboard.PAX_AC_SLIDER_TRAVEL_LARGE = YourDashPassengerDashboard.PAX_AC_SLIDER_TRAVEL_LARGE or 254
+
+YourDashPassengerDashboard.PAX_RADIO_UI_X_LARGE       = YourDashPassengerDashboard.PAX_RADIO_UI_X_LARGE       or 20
+YourDashPassengerDashboard.PAX_RADIO_UI_Y_LARGE       = YourDashPassengerDashboard.PAX_RADIO_UI_Y_LARGE       or 70
+YourDashPassengerDashboard.PAX_RADIO_VALUE_UI_X_LARGE = YourDashPassengerDashboard.PAX_RADIO_VALUE_UI_X_LARGE or 100
+YourDashPassengerDashboard.PAX_RADIO_VALUE_UI_Y_LARGE = YourDashPassengerDashboard.PAX_RADIO_VALUE_UI_Y_LARGE or 60
+
+function YourDashPassengerDashboard:_paxApplyTexturePack(useLarge, isInit)
+    useLarge = (useLarge == true)
+    self.__YourDashLarge = useLarge
+
+    local function tex(path, fallback)
+        return YourDash.GetTexture(path, fallback)
+    end
+
+    -- Passenger background + toggle textures (auto-try /large/)
+    self.__pax_bg_expanded  = tex(self.PAX_BG_EXPANDED)
+    self.__pax_bg_retracted = tex(self.PAX_BG_RETRACTED) or self.__pax_bg_expanded
+
+    self.__pax_btn_retract  = tex(self.PAX_BTN_RETRACT)
+    self.__pax_btn_expand   = tex(self.PAX_BTN_EXPAND) or self.__pax_btn_retract
+
+    -- Reused textures (auto-try /large/)
+    self.__lock_off     = tex("media/ui/vehicles/lock_off.png")
+    self.__lock_partial = tex("media/ui/vehicles/lock_partial.png") or self.__lock_off
+    self.__lock_on      = tex("media/ui/vehicles/lock_on.png")      or self.__lock_off
+
+    self.__window_switch      = tex("media/ui/vehicles/window_switch.png")
+    self.__window_switch_push = tex("media/ui/vehicles/window_switch_push.png") or self.__window_switch
+    self.__window_switch_pull = tex("media/ui/vehicles/window_switch_pull.png") or self.__window_switch
+
+
+    -- IMPORTANT: override BOTH reg + large fields so passenger doesn't inherit driver offsets
+
+    -- AC anchors (used by AC patch pick(reg, large))
+    self.AC_FAN_X         = self.PAX_AC_FAN_X
+    self.AC_FAN_Y         = self.PAX_AC_FAN_Y
+    self.AC_SLIDER_X      = self.PAX_AC_SLIDER_X
+    self.AC_SLIDER_Y      = self.PAX_AC_SLIDER_Y
+    self.AC_SLIDER_TRAVEL = self.PAX_AC_SLIDER_TRAVEL
+
+    self.AC_FAN_X_LARGE         = self.PAX_AC_FAN_X_LARGE
+    self.AC_FAN_Y_LARGE         = self.PAX_AC_FAN_Y_LARGE
+    self.AC_SLIDER_X_LARGE      = self.PAX_AC_SLIDER_X_LARGE
+    self.AC_SLIDER_Y_LARGE      = self.PAX_AC_SLIDER_Y_LARGE
+    self.AC_SLIDER_TRAVEL_LARGE = self.PAX_AC_SLIDER_TRAVEL_LARGE
+
+    -- Premium radio anchors (if you use premium radio UI)
+    self.RADIO_UI_X       = self.PAX_RADIO_UI_X
+    self.RADIO_UI_Y       = self.PAX_RADIO_UI_Y
+    self.RADIO_UI_X_LARGE = self.PAX_RADIO_UI_X_LARGE
+    self.RADIO_UI_Y_LARGE = self.PAX_RADIO_UI_Y_LARGE
+
+    -- Value radio anchors (used by value radio pick(reg, large))
+    self.RADIO_VALUE_UI_X       = self.PAX_RADIO_VALUE_UI_X
+    self.RADIO_VALUE_UI_Y       = self.PAX_RADIO_VALUE_UI_Y
+    self.RADIO_VALUE_UI_X_LARGE = self.PAX_RADIO_VALUE_UI_X_LARGE
+    self.RADIO_VALUE_UI_Y_LARGE = self.PAX_RADIO_VALUE_UI_Y_LARGE
+
+
+
+    -- If UI already built, refresh visuals/sizes
+    if self.backgroundTex then
+        self:_paxApplyBGTexture()
+    end
+
+    if self.paxToggleBtn then
+        local ttex = self.__pax_btn_retract or self.__pax_btn_expand
+        if ttex then self:_setImageTextureAndSize(self.paxToggleBtn, ttex) end
+        self:_paxRefreshToggleTexture()
+    end
+
+    if self.doorTex and self.__lock_off then
+        self:_setImageTextureAndSize(self.doorTex, self.__lock_off)
+    end
+
+    if self.windowTex and self.__window_switch then
+        self:_setImageTextureAndSize(self.windowTex, self.__window_switch)
+    end
+
+    if (not isInit) and self.onResolutionChange then
+        self:onResolutionChange()
+    end
+end
 
 -- =========================================================
 -- Fallback helpers (only define if your driver patch didn't)
@@ -213,50 +359,69 @@ end
 -- Constructor
 -- =========================================================
 function YourDashPassengerDashboard:new(playerNum, chr)
-	local o = ISPanel:new(0, 0, 10, 10)
-	setmetatable(o, self)
-	self.__index = self
+    local o = ISPanel:new(0, 0, 10, 10)
+    setmetatable(o, self)
+    self.__index = self
 
-	o.playerNum  = playerNum
-	o.character  = chr
-	o.vehicle    = nil
+    o.playerNum  = playerNum
+    o.character  = chr
+    o.vehicle    = nil
 
-	o.backgroundColor = { r=0, g=0, b=0, a=0 }
-	o.borderColor     = { r=0, g=0, b=0, a=0 }
+    o.backgroundColor = { r=0, g=0, b=0, a=0 }
+    o.borderColor     = { r=0, g=0, b=0, a=0 }
 
-	-- Textures
-	o.__pax_bg_expanded  = getTexture(self.PAX_BG_EXPANDED)
-	o.__pax_bg_retracted = getTexture(self.PAX_BG_RETRACTED) or o.__pax_bg_expanded
+    -- State
+    o.__paxRetracted = false
+    o.__paxChildrenCreated = false
+    o.__paxLastBarH = nil
 
-	o.__pax_btn_retract  = getTexture(self.PAX_BTN_RETRACT)
-	o.__pax_btn_expand   = getTexture(self.PAX_BTN_EXPAND) or o.__pax_btn_retract
+    -- Apply selected pack (Regular vs Large)
+    local wantLarge = YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures() or false
 
-	-- Reuse textures (same as driver dash)
-	o.__lock_off     = getTexture("media/ui/vehicles/lock_off.png")
-	o.__lock_partial = getTexture("media/ui/vehicles/lock_partial.png") or o.__lock_off
-	o.__lock_on      = getTexture("media/ui/vehicles/lock_on.png")      or o.__lock_off
+    if o._paxApplyTexturePack then
+        -- Preferred path (your new pack-aware loader + large offsets)
+        o:_paxApplyTexturePack(wantLarge, true)
+    else
+        -- Safe fallback (regular only, won't crash)
+        local function tex(path, fallback)
+            if YourDash and YourDash.GetTexture then
+                return YourDash.GetTexture(path, fallback)
+            end
+            local t = getTexture(path)
+            if (not t) and fallback then t = getTexture(fallback) end
+            return t
+        end
 
-	o.__window_switch      = getTexture("media/ui/vehicles/window_switch.png")
-	o.__window_switch_push = getTexture("media/ui/vehicles/window_switch_push.png") or o.__window_switch
-	o.__window_switch_pull = getTexture("media/ui/vehicles/window_switch_pull.png") or o.__window_switch
+        o.__pax_bg_expanded  = tex(self.PAX_BG_EXPANDED)
+        o.__pax_bg_retracted = tex(self.PAX_BG_RETRACTED) or o.__pax_bg_expanded
 
-	-- State
-	o.__paxRetracted = false
+        o.__pax_btn_retract  = tex(self.PAX_BTN_RETRACT)
+        o.__pax_btn_expand   = tex(self.PAX_BTN_EXPAND) or o.__pax_btn_retract
 
-	-- Instance overrides for AC/radio positioning (do NOT affect driver dash)
-	o.AC_FAN_X         = self.PAX_AC_FAN_X
-	o.AC_FAN_Y         = self.PAX_AC_FAN_Y
-	o.AC_SLIDER_X      = self.PAX_AC_SLIDER_X
-	o.AC_SLIDER_Y      = self.PAX_AC_SLIDER_Y
-	o.AC_SLIDER_TRAVEL = self.PAX_AC_SLIDER_TRAVEL
+        o.__lock_off     = tex("media/ui/vehicles/lock_off.png")
+        o.__lock_partial = tex("media/ui/vehicles/lock_partial.png") or o.__lock_off
+        o.__lock_on      = tex("media/ui/vehicles/lock_on.png")      or o.__lock_off
 
-	o.RADIO_UI_X        = self.PAX_RADIO_UI_X
-	o.RADIO_UI_Y        = self.PAX_RADIO_UI_Y
-	o.RADIO_VALUE_UI_X  = self.PAX_RADIO_VALUE_UI_X
-	o.RADIO_VALUE_UI_Y  = self.PAX_RADIO_VALUE_UI_Y
+        o.__window_switch      = tex("media/ui/vehicles/window_switch.png")
+        o.__window_switch_push = tex("media/ui/vehicles/window_switch_push.png") or o.__window_switch
+        o.__window_switch_pull = tex("media/ui/vehicles/window_switch_pull.png") or o.__window_switch
 
-	return o
+        -- Instance overrides (regular defaults)
+        o.AC_FAN_X         = self.PAX_AC_FAN_X
+        o.AC_FAN_Y         = self.PAX_AC_FAN_Y
+        o.AC_SLIDER_X      = self.PAX_AC_SLIDER_X
+        o.AC_SLIDER_Y      = self.PAX_AC_SLIDER_Y
+        o.AC_SLIDER_TRAVEL = self.PAX_AC_SLIDER_TRAVEL
+
+        o.RADIO_UI_X       = self.PAX_RADIO_UI_X
+        o.RADIO_UI_Y       = self.PAX_RADIO_UI_Y
+        o.RADIO_VALUE_UI_X = self.PAX_RADIO_VALUE_UI_X
+        o.RADIO_VALUE_UI_Y = self.PAX_RADIO_VALUE_UI_Y
+    end
+
+    return o
 end
+
 
 -- =========================================================
 -- Layout helpers
@@ -516,6 +681,15 @@ end
 function YourDashPassengerDashboard:onResolutionChange()
 	if not self.backgroundTex then return end
 
+    local useLarge = YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures() or false
+    local function pick(a, b) return useLarge and b or a end
+
+    local OFFX = pick(self.PAX_OFFSET_X, self.PAX_OFFSET_X_LARGE)
+    local OFFY = pick(self.PAX_OFFSET_Y, self.PAX_OFFSET_Y_LARGE)
+
+    local PAD  = pick(self.PAX_BAR_PAD, self.PAX_BAR_PAD_LARGE)
+
+
 	local screenLeft   = getPlayerScreenLeft(self.playerNum)
 	local screenTop    = getPlayerScreenTop(self.playerNum)
 	local screenWidth  = getPlayerScreenWidth(self.playerNum)
@@ -525,10 +699,21 @@ function YourDashPassengerDashboard:onResolutionChange()
 	self:setHeight(self.backgroundTex:getHeight())
 
 	local barH = self:_paxGetBarHeight()
-	local pad  = self.PAX_BAR_PAD or 0
+    local pad  = PAD or 0
 
-	local x = screenLeft + (screenWidth - self.width) / 2 + (self.PAX_OFFSET_X or 0)
-	local y = screenTop + screenHeight - self.height - barH - pad + (self.PAX_OFFSET_Y or 0)
+    local x = screenLeft + (screenWidth - self.width) / 2 + (OFFX or 0)
+    local y = screenTop + screenHeight - self.height - barH - pad + (OFFY or 0)
+
+    local TX = pick(self.PAX_TOGGLE_X, self.PAX_TOGGLE_X_LARGE)
+    local TY = pick(self.PAX_TOGGLE_Y, self.PAX_TOGGLE_Y_LARGE)
+
+    local DX = pick(self.PAX_DOOR_X, self.PAX_DOOR_X_LARGE)
+    local DY = pick(self.PAX_DOOR_Y, self.PAX_DOOR_Y_LARGE)
+
+    local WX = pick(self.PAX_WINDOW_X, self.PAX_WINDOW_X_LARGE)
+    local WY = pick(self.PAX_WINDOW_Y, self.PAX_WINDOW_Y_LARGE)
+
+
 
 	self:setX(x)
 	self:setY(y)
@@ -538,23 +723,23 @@ function YourDashPassengerDashboard:onResolutionChange()
 	self.backgroundTex:setY(0)
 
 	-- Toggle button
-	if self.paxToggleBtn then
-		local bx, by = self:_paxRelPos(self.PAX_TOGGLE_X or 0, self.PAX_TOGGLE_Y or 0, self.paxToggleBtn:getWidth(), self.paxToggleBtn:getHeight())
-		self.paxToggleBtn:setX(bx)
-		self.paxToggleBtn:setY(by)
-	end
+    if self.paxToggleBtn then
+        local bx, by = self:_paxRelPos(TX or 0, TY or 0, self.paxToggleBtn:getWidth(), self.paxToggleBtn:getHeight())
+        self.paxToggleBtn:setX(bx)
+        self.paxToggleBtn:setY(by)
+    end
 
-	-- Door / window
-	if self.doorTex then
-		local bx, by = self:_paxRelPos(self.PAX_DOOR_X or 0, self.PAX_DOOR_Y or 0, self.doorTex:getWidth(), self.doorTex:getHeight())
-		self.doorTex:setX(bx)
-		self.doorTex:setY(by)
-	end
-	if self.windowTex then
-		local bx, by = self:_paxRelPos(self.PAX_WINDOW_X or 0, self.PAX_WINDOW_Y or 0, self.windowTex:getWidth(), self.windowTex:getHeight())
-		self.windowTex:setX(bx)
-		self.windowTex:setY(by)
-	end
+    if self.doorTex then
+        local bx, by = self:_paxRelPos(DX or 0, DY or 0, self.doorTex:getWidth(), self.doorTex:getHeight())
+        self.doorTex:setX(bx)
+        self.doorTex:setY(by)
+    end
+
+    if self.windowTex then
+        local bx, by = self:_paxRelPos(WX or 0, WY or 0, self.windowTex:getWidth(), self.windowTex:getHeight())
+        self.windowTex:setX(bx)
+        self.windowTex:setY(by)
+    end
 
 	-- AC positions (uses instance overrides AC_* we set in new())
 	if self._positionACControls then pcall(function() self:_positionACControls() end) end
@@ -569,6 +754,13 @@ end
 -- =========================================================
 function YourDashPassengerDashboard:prerender()
 	if not self.vehicle or not ISUIHandler.allUIVisible then return end
+
+	-- Hot-swap passenger texture pack if option changed
+    local wantLarge = YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures() or false
+    if self.__YourDashLarge ~= wantLarge then
+        self:_paxApplyTexturePack(wantLarge, false)
+    end
+
 
 	-- Auto-hide if seat changed (extra safety for instant seat swaps)
 	local chr = self.character
