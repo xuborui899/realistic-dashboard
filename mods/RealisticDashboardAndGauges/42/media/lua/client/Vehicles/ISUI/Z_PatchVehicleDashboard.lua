@@ -25,6 +25,32 @@ YourDash.OPT_TEXSIZE_ID = "TextureSize" -- 1=Regular, 2=Large (2x)
 
 YourDash._useLargeTextures = YourDash._useLargeTextures or false
 
+-- Damage overlay intensity (cracks + stain)
+-- 1=Full(90%), 2=Medium(65%), 3=Low(40%), 4=Off(0%)
+YourDash.OPT_WEARFX_ID = "WearFX"
+
+YourDash._wearFxLevel = YourDash._wearFxLevel or 1
+YourDash._wearFxAlpha = YourDash._wearFxAlpha or 0.90
+
+local function YourDash_WearAlphaFromLevel(level)
+    if level == 1 then return 0.90 end
+    if level == 2 then return 0.65 end
+    if level == 3 then return 0.40 end
+    return 0.0
+end
+
+function YourDash.GetWearFxAlpha()
+    return YourDash._wearFxAlpha or 0.90
+end
+
+function YourDash.SetWearFxLevel(level)
+    local lv = tonumber(level) or 1
+    if lv < 1 then lv = 1 elseif lv > 4 then lv = 4 end
+    YourDash._wearFxLevel = lv
+    YourDash._wearFxAlpha = YourDash_WearAlphaFromLevel(lv)
+end
+
+
 function YourDash.UseLargeTextures()
     return YourDash._useLargeTextures == true
 end
@@ -87,23 +113,31 @@ end
 
 local function YourDash_ReadSavedOption()
     local wantLarge = false
+    local wearLevel = 1
 
     -- Build 42 native ModOptions
     if PZAPI and PZAPI.ModOptions then
         local sec = PZAPI.ModOptions:getOptions(YourDash.MODOPT_ID)
         if sec then
-            local opt = sec:getOption(YourDash.OPT_TEXSIZE_ID)
-            local idx = opt and opt:getValue() or 1
-            wantLarge = (idx == 2)
+            local optSize = sec:getOption(YourDash.OPT_TEXSIZE_ID)
+            local idxSize = optSize and optSize:getValue() or 1
+            wantLarge = (idxSize == 2)
+
+            local optWear = sec:getOption(YourDash.OPT_WEARFX_ID)
+            local idxWear = optWear and optWear:getValue() or 1
+            wearLevel = idxWear
         end
 
     -- Optional fallback: Build 41 "ModOptions" mod
     elseif YourDash.OPTIONS_B41 then
         wantLarge = (YourDash.OPTIONS_B41.UseLargeTextures == true)
+        wearLevel = tonumber(YourDash.OPTIONS_B41.WearFxLevel) or 1
     end
 
     YourDash.SetUseLargeTextures(wantLarge)
+    YourDash.SetWearFxLevel(wearLevel)
 end
+
 
 local function YourDash_RegisterModOptions()
     -- Ensure native ModOptions is loaded (B42)
@@ -123,13 +157,26 @@ local function YourDash_RegisterModOptions()
             local combo = sec:addComboBox(YourDash.OPT_TEXSIZE_ID, "Dashboard texture size", nil)
             combo:addItem("Regular", true)
             combo:addItem("Large (2x)", false)
+
+            sec:addTitle("Damage overlays")
+            sec:addDescription("Choose effect opacity for dynamic cracks and stains.")
+            local wear = sec:addComboBox(YourDash.OPT_WEARFX_ID, "Cracks & stains intensity", nil)
+            
+            wear:addItem("Full (default)", true)
+            wear:addItem("Medium", false)
+            wear:addItem("Low", false)
+            wear:addItem("Off", false)
         end
 
         if sec then
             sec.apply = function(self)
-                local opt = self:getOption(YourDash.OPT_TEXSIZE_ID)
-                local idx = opt and opt:getValue() or 1
-                YourDash.SetUseLargeTextures(idx == 2)
+                local optSize = self:getOption(YourDash.OPT_TEXSIZE_ID)
+                local idxSize = optSize and optSize:getValue() or 1
+                YourDash.SetUseLargeTextures(idxSize == 2)
+
+                local optWear = self:getOption(YourDash.OPT_WEARFX_ID)
+                local idxWear = optWear and optWear:getValue() or 1
+                YourDash.SetWearFxLevel(idxWear)
             end
         end
     else
@@ -1123,11 +1170,17 @@ function ISVehicleDashboard:_YourDashEnsureGlassOverlay()
         local w, h = self.width, self.height
         if w <= 0 or h <= 0 then return end
 
+        local wearA = (YourDash and YourDash.GetWearFxAlpha and YourDash.GetWearFxAlpha()) or 0.90
+
         -- ORDER: cracks below stain below dash overlay
-        if dash.__crackTex then self:drawTextureScaled(dash.__crackTex, 0, 0, w, h, 1) end
-        if dash.__stainTex then self:drawTextureScaled(dash.__stainTex, 0, 0, w, h, 1) end
-        if dash.__dashTex  then self:drawTextureScaled(dash.__dashTex,  0, 0, w, h, 1) end
+        if wearA > 0 then
+            if dash.__crackTex then self:drawTextureScaled(dash.__crackTex, 0, 0, w, h, wearA) end
+            if dash.__stainTex then self:drawTextureScaled(dash.__stainTex, 0, 0, w, h, wearA) end
+        end
+
+        if dash.__dashTex then self:drawTextureScaled(dash.__dashTex, 0, 0, w, h, 1) end
     end
+
 
     self.__YourDashGlassOverlay = o
     self:addChild(o)
@@ -1466,23 +1519,27 @@ function ISVehicleDashboard:createChildren()
                 local impact = (dash and dash.__impactDimAlpha) or 1.0
                 self:drawTextureScaled(lidTex, 0, 0, w, h, lidAlpha * elec * impact)
             end
+--[[
 
             -- cracks layer (never flashes)  [BELOW stain]
             local crackTex = dash and dash.__crackTex or nil
-            if crackTex then
-                self:drawTextureScaled(crackTex, 0, 0, w, h, (self.alpha or 1))
+            if crackTex and wearA > 0 then
+                self:drawTextureScaled(crackTex, 0, 0, w, h, (self.alpha or 1) * wearA)
             end
+
             -- stain layer (never flashes)
             local stainTex = dash and dash.__stainTex or nil
-            if stainTex then
-                self:drawTextureScaled(stainTex, 0, 0, w, h, (self.alpha or 1))
+            if stainTex and wearA > 0 then
+                self:drawTextureScaled(stainTex, 0, 0, w, h, (self.alpha or 1) * wearA)
             end
+
 
             -- dash overlay (glass/texture) never flashes
             local dashTex = dash and dash.__dashTex or nil
             if dashTex then
                 self:drawTextureScaled(dashTex, 0, 0, w, h, (self.alpha or 1))
             end
+            ]]
         end
 
     end
