@@ -6,7 +6,7 @@ require "ISUI/ISImage"
 require "TimedActions/ISTimedActionQueue"
 require "RadioCom/ISRadioAction"
 require "RadioCom/RadioWindowModules/RWMPanel" -- PresetEntry.new
-require "YourDash/Z_PatchVehicleDashboard_RadioRouter"
+-- require "YourDash/Z_PatchVehicleDashboard_RadioRouter"
 
 -- Guard: don’t patch twice
 if ISVehicleDashboard.__DashRadioValuePatched then return end
@@ -15,8 +15,8 @@ ISVehicleDashboard.__DashRadioValuePatched = true
 -- =========================================================
 -- Config
 -- =========================================================
-ISVehicleDashboard.RADIO_VALUE_UI_X = ISVehicleDashboard.RADIO_VALUE_UI_X or 610
-ISVehicleDashboard.RADIO_VALUE_UI_Y = ISVehicleDashboard.RADIO_VALUE_UI_Y or 61
+ISVehicleDashboard.RADIO_VALUE_UI_X = ISVehicleDashboard.RADIO_VALUE_UI_X or 600
+ISVehicleDashboard.RADIO_VALUE_UI_Y = ISVehicleDashboard.RADIO_VALUE_UI_Y or 55
 
 ISVehicleDashboard.RADIO_VALUE_POWER_OFF_X = ISVehicleDashboard.RADIO_VALUE_POWER_OFF_X or 19
 ISVehicleDashboard.RADIO_VALUE_POWER_OFF_Y = ISVehicleDashboard.RADIO_VALUE_POWER_OFF_Y or 19

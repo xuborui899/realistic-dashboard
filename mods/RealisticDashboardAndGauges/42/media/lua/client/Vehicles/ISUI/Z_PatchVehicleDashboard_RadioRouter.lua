@@ -1,4 +1,3 @@
--- media/lua/client/YourDash/Z_PatchVehicleDashboard_RadioRouter.lua
 if isServer() then return end
 
 require "Vehicles/ISUI/ISVehicleDashboard"
@@ -7,37 +6,123 @@ require "Vehicles/ISUI/ISVehicleDashboard"
 if ISVehicleDashboard.__YourDashRadioRouterPatched then return end
 ISVehicleDashboard.__YourDashRadioRouterPatched = true
 
--- Tell submodules not to hook dashboard methods.
-ISVehicleDashboard.__YourDashRadioRouterActive = true
-require "YourDash/Z_PatchVehicleDashboard_RadioPremium"
-require "YourDash/Z_PatchVehicleDashboard_RadioValue"
--- keep the flag true so late requires still won’t hook
+-- =========================================================
+-- Capture CURRENT dashboard methods BEFORE loading radio modules.
+-- IMPORTANT: load this router AFTER your main dashboard patch.
+-- =========================================================
+local _baseCreateChildren = ISVehicleDashboard.createChildren
+local _baseOnRes          = ISVehicleDashboard.onResolutionChange
+local _basePrerender      = ISVehicleDashboard.prerender
 
--- ---------------------------------------------------------
--- Detect installed vehicle radio: premium vs value vs none
--- ---------------------------------------------------------
+-- Tell submodules not to hook dashboard methods (if they support it)
+ISVehicleDashboard.__YourDashRadioRouterActive = true
+
+-- Load submodules (they should only define helpers like _ensureRadioControls, etc.)
+pcall(require, "YourDash/Z_PatchVehicleDashboard_RadioPremium")
+pcall(require, "YourDash/Z_PatchVehicleDashboard_RadioValue")
+
+-- =========================================================
+-- Safe radio part finder: returns an INSTALLED radio part or nil.
+-- Works for motorcycles/no-radio vehicles and weird modded part IDs.
+-- =========================================================
+function ISVehicleDashboard:_yourDashFindInstalledRadioPart()
+    local v = self and self.vehicle
+    if not v then return nil end
+
+    -- Try cached id for THIS vehicle instance
+    if self.__yourDashRadioPartVehicle == v and self.__yourDashRadioPartId then
+        local ok, p = pcall(function()
+            if v.getPartById then return v:getPartById(self.__yourDashRadioPartId) end
+            return nil
+        end)
+        if ok and p then
+            local okInv, inv = pcall(function()
+                return p.getInventoryItem and p:getInventoryItem() or nil
+            end)
+            if okInv and inv then return p end
+        end
+        self.__yourDashRadioPartId = nil
+    end
+
+    -- Vanilla ID
+    local ok, p = pcall(function()
+        if v.getPartById then return v:getPartById("Radio") end
+        return nil
+    end)
+    if ok and p then
+        local okInv, inv = pcall(function()
+            return p.getInventoryItem and p:getInventoryItem() or nil
+        end)
+        if okInv and inv then
+            self.__yourDashRadioPartVehicle = v
+            self.__yourDashRadioPartId = "Radio"
+            return p
+        end
+        return nil
+    end
+
+    -- Fallback: scan parts for installed Base.Radio*
+    local okCnt, cnt = pcall(function()
+        return (v.getPartCount and v:getPartCount()) or 0
+    end)
+    cnt = (okCnt and cnt) or 0
+
+    for i = 0, cnt - 1 do
+        local part = v:getPartByIndex(i)
+        if part and part.getInventoryItem then
+            local okInv, inv = pcall(function() return part:getInventoryItem() end)
+            if okInv and inv and inv.getFullType then
+                local okFt, ft = pcall(function() return inv:getFullType() end)
+                if okFt and ft and string.find(ft, "Base.Radio", 1, true) then
+                    local okId, id = pcall(function()
+                        return part.getId and part:getId() or nil
+                    end)
+                    if okId and id then
+                        self.__yourDashRadioPartVehicle = v
+                        self.__yourDashRadioPartId = id
+                    end
+                    return part
+                end
+            end
+        end
+    end
+
+    return nil
+end
+
+-- =========================================================
+-- Hard override: this is the SIMPLE motorcycle fix you asked for.
+-- If there is no radio part, this returns nil and NEVER throws.
+-- =========================================================
+function ISVehicleDashboard:_getVehicleRadioPart()
+    return self:_yourDashFindInstalledRadioPart()
+end
+
 function ISVehicleDashboard:_yourDashGetInstalledRadioFullType()
-    local part = self._getVehicleRadioPart and self:_getVehicleRadioPart() or nil
+    local part = self:_yourDashFindInstalledRadioPart()
     if not part then return nil end
 
-    local item = part.getInventoryItem and part:getInventoryItem() or nil
-    if not item then return nil end
+    local okInv, inv = pcall(function()
+        return part.getInventoryItem and part:getInventoryItem() or nil
+    end)
+    if not okInv or not inv then return nil end
 
-    if item.getFullType then
-        return item:getFullType()
-    end
+    local okFt, ft = pcall(function()
+        return inv.getFullType and inv:getFullType() or nil
+    end)
+    if okFt then return ft end
     return nil
 end
 
 function ISVehicleDashboard:_yourDashPickRadioUI()
     local ft = self:_yourDashGetInstalledRadioFullType()
-    if not ft then return nil end            -- no radio installed
+    if not ft then return nil end
     if ft == "Base.RadioRed" then return "premium" end
     return "value"
 end
 
 -- ---------------------------------------------------------
--- Hide helpers (avoid leftover UI when switching cars)
+-- Hide helpers (same idea as yours)
 -- ---------------------------------------------------------
 function ISVehicleDashboard:_yourDashHidePremiumRadioUI()
     if self.radioBG then self.radioBG:setVisible(false) end
@@ -75,28 +160,24 @@ function ISVehicleDashboard:_yourDashHideValueRadioUI()
 end
 
 -- ---------------------------------------------------------
--- Dispatch update
+-- Dispatch update: if no radio -> hide both and stop.
 -- ---------------------------------------------------------
 function ISVehicleDashboard:_yourDashUpdateRoutedRadio()
     local which = self:_yourDashPickRadioUI()
 
     if which == "premium" then
         self:_yourDashHideValueRadioUI()
-        if self._updateRadioControls then
-            self:_updateRadioControls()
-        end
+        if self._updateRadioControls then self:_updateRadioControls() end
         return
     end
 
     if which == "value" then
         self:_yourDashHidePremiumRadioUI()
-        if self._updateValueRadioControls then
-            self:_updateValueRadioControls()
-        end
+        if self._updateValueRadioControls then self:_updateValueRadioControls() end
         return
     end
 
-    -- none
+    -- none (motorcycles etc.)
     self:_yourDashHidePremiumRadioUI()
     self:_yourDashHideValueRadioUI()
 end
@@ -110,32 +191,48 @@ function ISVehicleDashboard:_yourDashPositionRoutedRadio()
     end
 end
 
--- ---------------------------------------------------------
--- Hooks (router owns the hooks)
--- ---------------------------------------------------------
-local _oldCreateChildren = ISVehicleDashboard.createChildren
+-- =========================================================
+-- Router owns hooks (using BASE methods captured pre-modules)
+-- =========================================================
 function ISVehicleDashboard:createChildren()
-    if _oldCreateChildren then _oldCreateChildren(self) end
-
-    -- Lazy-create both sets so switching cars is seamless
-    if self._ensureRadioControls then self:_ensureRadioControls() end
-    if self._ensureValueRadioControls then self:_ensureValueRadioControls() end
-
+    if _baseCreateChildren then _baseCreateChildren(self) end
+    if self._ensureRadioControls then pcall(function() self:_ensureRadioControls() end) end
+    if self._ensureValueRadioControls then pcall(function() self:_ensureValueRadioControls() end) end
     self:_yourDashPositionRoutedRadio()
 end
 
-local _oldOnRes = ISVehicleDashboard.onResolutionChange
 function ISVehicleDashboard:onResolutionChange()
-    if _oldOnRes then _oldOnRes(self) end
+    if _baseOnRes then _baseOnRes(self) end
     self:_yourDashPositionRoutedRadio()
 end
 
-local _oldPrerender = ISVehicleDashboard.prerender
 function ISVehicleDashboard:prerender()
-    if _oldPrerender then _oldPrerender(self) end
+    if _basePrerender then _basePrerender(self) end
     if not self.vehicle or not ISUIHandler.allUIVisible then return end
     self:_yourDashUpdateRoutedRadio()
 end
 
--- require "YourDash/ZZ_PatchVehicleDashboard_PassengerDash"
+-- Extra safety: if Premium/Value update gets called from anywhere, bail on no-radio vehicles.
+do
+    local _oldPremiumUpdate = ISVehicleDashboard._updateRadioControls
+    if _oldPremiumUpdate then
+        function ISVehicleDashboard:_updateRadioControls(...)
+            if not self:_yourDashFindInstalledRadioPart() then
+                self:_yourDashHidePremiumRadioUI()
+                return
+            end
+            return _oldPremiumUpdate(self, ...)
+        end
+    end
 
+    local _oldValueUpdate = ISVehicleDashboard._updateValueRadioControls
+    if _oldValueUpdate then
+        function ISVehicleDashboard:_updateValueRadioControls(...)
+            if not self:_yourDashFindInstalledRadioPart() then
+                self:_yourDashHideValueRadioUI()
+                return
+            end
+            return _oldValueUpdate(self, ...)
+        end
+    end
+end

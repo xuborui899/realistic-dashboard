@@ -519,9 +519,9 @@ function ISVehicleDashboard:_crackLevelFromWindshieldCondition(cond)
         return nil
     end
 
-    if cond >= 61 then return 1 end
-    if cond >= 41 then return 2 end
-    if cond >= 21 then return 3 end
+    if cond >= 55 then return 1 end
+    if cond >= 30 then return 2 end
+    if cond >= 10 then return 3 end
     return 4
 end
 
@@ -1536,16 +1536,16 @@ function ISVehicleDashboard:prerender()
 
                         -- per your timing spec (staggered, not same time)
                         self.__warnChkRelease = {
-                            light   = 1.50,  -- headlights indicator
-                            door    = 1.50,  -- door indicator
+                            light   = 0.5,  -- headlights indicator
+                            door    = 0.5,  -- door indicator
 
-                            brake   = 2.05,
-                            stop    = 2.75,
-                            check   = 3.25,
-                            battery = 2,
-                            cruise  = 1.5,
+                            brake   = 0.5,
+                            stop    = 1.25,
+                            check   = 1.5,
+                            battery = 1.5,
+                            cruise  = 0.5,
 
-                            fuel    = 5.00,
+                            fuel    = 0.5,
                         }
                     elseif not cranking then
                         -- Cranking ended but engine didn't start -> abort immediately

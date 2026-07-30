@@ -8,7 +8,7 @@ require "TimedActions/ISTimedActionQueue"
 require "RadioCom/ISRadioAction"
 require "RadioCom/RadioWindowModules/RWMPanel" -- PresetEntry.new
 require "ISUI/ISContextMenu"
-require "YourDash/Z_PatchVehicleDashboard_RadioRouter"
+-- require "YourDash/Z_PatchVehicleDashboard_RadioRouter"
 
 -- =========================
 -- Config
