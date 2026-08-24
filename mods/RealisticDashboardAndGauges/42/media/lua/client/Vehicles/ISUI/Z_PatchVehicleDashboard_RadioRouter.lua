@@ -1,5 +1,6 @@
 if isServer() then return end
 
+require "YourDash/DashboardCore"
 require "Vehicles/ISUI/ISVehicleDashboard"
 
 -- Guard: don’t patch twice
@@ -13,13 +14,50 @@ ISVehicleDashboard.__YourDashRadioRouterPatched = true
 local _baseCreateChildren = ISVehicleDashboard.createChildren
 local _baseOnRes          = ISVehicleDashboard.onResolutionChange
 local _basePrerender      = ISVehicleDashboard.prerender
+local _baseSetVehicle     = ISVehicleDashboard.setVehicle
 
 -- Tell submodules not to hook dashboard methods (if they support it)
 ISVehicleDashboard.__YourDashRadioRouterActive = true
 
--- Load submodules (they should only define helpers like _ensureRadioControls, etc.)
-pcall(require, "YourDash/Z_PatchVehicleDashboard_RadioPremium")
-pcall(require, "YourDash/Z_PatchVehicleDashboard_RadioValue")
+-- Load helper-only radio modules from their actual client module paths.
+-- Fail loudly here if either module is absent; a half-installed router would hide
+-- the vanilla radio icon without providing a replacement.
+require "Vehicles/ISUI/Z_PatchVehicleDashboard_RadioPremium"
+require "Vehicles/ISUI/Z_PatchVehicleDashboard_RadioValue"
+
+function ISVehicleDashboard:_yourDashResetRadioTransientState()
+    self.__yourDashRadioPartVehicle = nil
+    self.__yourDashRadioPartId = nil
+
+    self.__radioSource = nil
+    self.__radioMuted = false
+    self.__radioPrevVol = nil
+    self.__radioCdPaused = false
+    self.__radioCdMutedByPause = false
+    self.__radioCdPrevVol = nil
+    self.__radioMediaNameCache = nil
+    self.__radioLoading = false
+    self.__radioLoadingCdPausedAfter = nil
+    self.__radioLoadingRestoreVolAfter = nil
+    self.__radioLoadingRestoreVolValue = nil
+    self.__radioLoadingExpectedSource = nil
+    self.__radioLoadingJustStarted = nil
+    self.__radioLoadingTargetPlaying = nil
+    self.__radioSetArmed = false
+    self.__radioSetArmedT = 0
+    self.__radioTuneScanActive = false
+    self.__radioFreqHoldActive = false
+    self.__radioMarqueeText = nil
+    self.__radioMarqueeOffset = 0
+    self.__radioTextLeft, self.__radioTextMid, self.__radioTextRight = nil, nil, nil
+
+    self.__radioValueMuted = false
+    self.__radioValuePrevVol = nil
+    self.__radioValueSetArmed = false
+    self.__radioValueSetArmedT = 0
+    self.__radioValueFreqHoldActive = false
+    self.__radioValueTextLeft, self.__radioValueTextRight = nil, nil
+end
 
 -- =========================================================
 -- Safe radio part finder: returns an INSTALLED radio part or nil.
@@ -194,6 +232,12 @@ end
 -- =========================================================
 -- Router owns hooks (using BASE methods captured pre-modules)
 -- =========================================================
+function ISVehicleDashboard:setVehicle(vehicle)
+    local previousVehicle = self.vehicle
+    if _baseSetVehicle then _baseSetVehicle(self, vehicle) end
+    if previousVehicle ~= vehicle then self:_yourDashResetRadioTransientState() end
+end
+
 function ISVehicleDashboard:createChildren()
     if _baseCreateChildren then _baseCreateChildren(self) end
     if self._ensureRadioControls then pcall(function() self:_ensureRadioControls() end) end
@@ -236,3 +280,7 @@ do
         end
     end
 end
+
+-- Make the sport layer the deterministic final dashboard wrapper.  The file
+-- also has a guard, so its normal alphabetical auto-load remains harmless.
+require "Vehicles/ISUI/ZZZ_YourDashSport"

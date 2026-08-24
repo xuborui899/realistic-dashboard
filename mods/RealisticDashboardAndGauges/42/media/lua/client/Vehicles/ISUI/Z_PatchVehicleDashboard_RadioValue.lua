@@ -1,12 +1,12 @@
--- media/lua/client/YourDash/Z_PatchVehicleDashboard_RadioValue.lua
+-- media/lua/client/Vehicles/ISUI/Z_PatchVehicleDashboard_RadioValue.lua
 if isServer() then return end
 
+require "YourDash/DashboardCore"
 require "Vehicles/ISUI/ISVehicleDashboard"
 require "ISUI/ISImage"
 require "TimedActions/ISTimedActionQueue"
 require "RadioCom/ISRadioAction"
 require "RadioCom/RadioWindowModules/RWMPanel" -- PresetEntry.new
--- require "YourDash/Z_PatchVehicleDashboard_RadioRouter"
 
 -- Guard: don’t patch twice
 if ISVehicleDashboard.__DashRadioValuePatched then return end
@@ -15,53 +15,53 @@ ISVehicleDashboard.__DashRadioValuePatched = true
 -- =========================================================
 -- Config
 -- =========================================================
-ISVehicleDashboard.RADIO_VALUE_UI_X = ISVehicleDashboard.RADIO_VALUE_UI_X or 600
-ISVehicleDashboard.RADIO_VALUE_UI_Y = ISVehicleDashboard.RADIO_VALUE_UI_Y or 55
+ISVehicleDashboard.RADIO_VALUE_UI_X = 557
+ISVehicleDashboard.RADIO_VALUE_UI_Y = 60
 
-ISVehicleDashboard.RADIO_VALUE_POWER_OFF_X = ISVehicleDashboard.RADIO_VALUE_POWER_OFF_X or 19
-ISVehicleDashboard.RADIO_VALUE_POWER_OFF_Y = ISVehicleDashboard.RADIO_VALUE_POWER_OFF_Y or 19
+ISVehicleDashboard.RADIO_VALUE_POWER_OFF_X = ISVehicleDashboard.RADIO_VALUE_POWER_OFF_X or 18
+ISVehicleDashboard.RADIO_VALUE_POWER_OFF_Y = ISVehicleDashboard.RADIO_VALUE_POWER_OFF_Y or 17
 
 ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_X = ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_X or 11
-ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_Y = ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_Y or 36
+ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_Y = ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_Y or 31
 
 ISVehicleDashboard.RADIO_VALUE_VOL_UP_OFF_X = ISVehicleDashboard.RADIO_VALUE_VOL_UP_OFF_X or 11
 ISVehicleDashboard.RADIO_VALUE_VOL_UP_OFF_Y = ISVehicleDashboard.RADIO_VALUE_VOL_UP_OFF_Y or 3
 
-ISVehicleDashboard.RADIO_VALUE_SET_OFF_X = ISVehicleDashboard.RADIO_VALUE_SET_OFF_X or 163
-ISVehicleDashboard.RADIO_VALUE_SET_OFF_Y = ISVehicleDashboard.RADIO_VALUE_SET_OFF_Y or 38
+ISVehicleDashboard.RADIO_VALUE_SET_OFF_X = ISVehicleDashboard.RADIO_VALUE_SET_OFF_X or 145
+ISVehicleDashboard.RADIO_VALUE_SET_OFF_Y = ISVehicleDashboard.RADIO_VALUE_SET_OFF_Y or 34
 
-ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_X = ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_X or 36
-ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_Y = ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_Y or 11
+ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_X = ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_X or 32
+ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_Y = ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_Y or 10
 
-ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_X = ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_X or 3
-ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_Y = ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_Y or 11
+ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_X = ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_X or 4
+ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_Y = ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_Y or 10
 
-ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_X = ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_X or 128
-ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_Y = ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_Y or 38
+ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_X = ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_X or 115
+ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_Y = ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_Y or 33
 
 -- Channel buttons (per-button offsets, relative to radioBG top-left)
-ISVehicleDashboard.RADIO_VALUE_CH1_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH1_OFF_X or 126
-ISVehicleDashboard.RADIO_VALUE_CH1_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH1_OFF_Y or 9
-ISVehicleDashboard.RADIO_VALUE_CH2_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH2_OFF_X or 148
-ISVehicleDashboard.RADIO_VALUE_CH2_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH2_OFF_Y or 9
-ISVehicleDashboard.RADIO_VALUE_CH3_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH3_OFF_X or 170
-ISVehicleDashboard.RADIO_VALUE_CH3_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH3_OFF_Y or 9
-ISVehicleDashboard.RADIO_VALUE_CH4_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH4_OFF_X or 126
-ISVehicleDashboard.RADIO_VALUE_CH4_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH4_OFF_Y or 23
-ISVehicleDashboard.RADIO_VALUE_CH5_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH5_OFF_X or 148
-ISVehicleDashboard.RADIO_VALUE_CH5_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH5_OFF_Y or 23
-ISVehicleDashboard.RADIO_VALUE_CH6_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH6_OFF_X or 170
-ISVehicleDashboard.RADIO_VALUE_CH6_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH6_OFF_Y or 23
+ISVehicleDashboard.RADIO_VALUE_CH1_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH1_OFF_X or 115
+ISVehicleDashboard.RADIO_VALUE_CH1_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH1_OFF_Y or 5
+ISVehicleDashboard.RADIO_VALUE_CH2_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH2_OFF_X or 134
+ISVehicleDashboard.RADIO_VALUE_CH2_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH2_OFF_Y or 5
+ISVehicleDashboard.RADIO_VALUE_CH3_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH3_OFF_X or 153
+ISVehicleDashboard.RADIO_VALUE_CH3_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH3_OFF_Y or 5
+ISVehicleDashboard.RADIO_VALUE_CH4_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH4_OFF_X or 115
+ISVehicleDashboard.RADIO_VALUE_CH4_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH4_OFF_Y or 19
+ISVehicleDashboard.RADIO_VALUE_CH5_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH5_OFF_X or 134
+ISVehicleDashboard.RADIO_VALUE_CH5_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH5_OFF_Y or 19
+ISVehicleDashboard.RADIO_VALUE_CH6_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH6_OFF_X or 153
+ISVehicleDashboard.RADIO_VALUE_CH6_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH6_OFF_Y or 19
 
 -- Text positions (relative to radioBG local coords)
-ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_X = ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_X or 62
-ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_Y = ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_Y or 19
-ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_X = ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_X or -76 -- negative = from right edge
-ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_Y = ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_Y or 19
+ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_X = ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_X or 53
+ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_Y = ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_Y or 15
+ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_X = ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_X or -62 -- negative = from right edge
+ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_Y = ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_Y or 15
 
 -- Optional "set?" center position (relative to radioBG local coords)
-ISVehicleDashboard.RADIO_VALUE_TEXT_SET_X = ISVehicleDashboard.RADIO_VALUE_TEXT_SET_X or 0
-ISVehicleDashboard.RADIO_VALUE_TEXT_SET_Y = ISVehicleDashboard.RADIO_VALUE_TEXT_SET_Y or 19
+ISVehicleDashboard.RADIO_VALUE_TEXT_SET_X = ISVehicleDashboard.RADIO_VALUE_TEXT_SET_X or -7
+ISVehicleDashboard.RADIO_VALUE_TEXT_SET_Y = ISVehicleDashboard.RADIO_VALUE_TEXT_SET_Y or 15
 
 -- Behavior
 ISVehicleDashboard.RADIO_VALUE_VOL_STEP = ISVehicleDashboard.RADIO_VALUE_VOL_STEP or 0.1
@@ -76,63 +76,12 @@ ISVehicleDashboard.RADIO_VALUE_PRESET_PAD_FREQ = ISVehicleDashboard.RADIO_VALUE_
 ISVehicleDashboard.RADIO_VALUE_PRESET_PAD_NAME = ISVehicleDashboard.RADIO_VALUE_PRESET_PAD_NAME or " "
 ISVehicleDashboard.RADIO_VALUE_PRESET_WRITE_NAME = ISVehicleDashboard.RADIO_VALUE_PRESET_WRITE_NAME or " "
 
--- LCD style
-ISVehicleDashboard.RADIO_VALUE_TEXT_FONT = ISVehicleDashboard.RADIO_VALUE_TEXT_FONT or UIFont.Small
-ISVehicleDashboard.RADIO_VALUE_TEXT_FONT_LARGE = ISVehicleDashboard.RADIO_VALUE_TEXT_FONT_LARGE or UIFont.Large
+-- LCD style.  Font size is selected by DashboardCore for the active pack.
 ISVehicleDashboard.RADIO_VALUE_TEXT_A = ISVehicleDashboard.RADIO_VALUE_TEXT_A or 0.95
 ISVehicleDashboard.RADIO_VALUE_TEXT_RGB = ISVehicleDashboard.RADIO_VALUE_TEXT_RGB or { r=0.22, g=0.20, b=0.1 }
-ISVehicleDashboard.RADIO_VALUE_LCD_SCALE = ISVehicleDashboard.RADIO_VALUE_LCD_SCALE or 1.0
 
 -- SET timeout
 ISVehicleDashboard.RADIO_VALUE_SET_TIMEOUT_S = ISVehicleDashboard.RADIO_VALUE_SET_TIMEOUT_S or 10.0
-
--- =========================================================
--- Large (2x) offsets (RAW numbers, easy to tune later)
--- =========================================================
-ISVehicleDashboard.RADIO_VALUE_UI_X_LARGE = ISVehicleDashboard.RADIO_VALUE_UI_X_LARGE or 1200
-ISVehicleDashboard.RADIO_VALUE_UI_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_UI_Y_LARGE or 110
-
-ISVehicleDashboard.RADIO_VALUE_POWER_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_POWER_OFF_X_LARGE or 38
-ISVehicleDashboard.RADIO_VALUE_POWER_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_POWER_OFF_Y_LARGE or 38
-
-ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_X_LARGE or 22
-ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_VOL_DOWN_OFF_Y_LARGE or 72
-
-ISVehicleDashboard.RADIO_VALUE_VOL_UP_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_VOL_UP_OFF_X_LARGE or 22
-ISVehicleDashboard.RADIO_VALUE_VOL_UP_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_VOL_UP_OFF_Y_LARGE or 6
-
-ISVehicleDashboard.RADIO_VALUE_SET_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_SET_OFF_X_LARGE or 326
-ISVehicleDashboard.RADIO_VALUE_SET_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_SET_OFF_Y_LARGE or 76
-
-ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_X_LARGE or 72
-ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_FREQ_UP_OFF_Y_LARGE or 22
-
-ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_X_LARGE or 6
-ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_FREQ_DOWN_OFF_Y_LARGE or 22
-
-ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_X_LARGE or 256
-ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_MUTE_OFF_Y_LARGE or 76
-
-ISVehicleDashboard.RADIO_VALUE_CH1_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_CH1_OFF_X_LARGE or 252
-ISVehicleDashboard.RADIO_VALUE_CH1_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_CH1_OFF_Y_LARGE or 18
-ISVehicleDashboard.RADIO_VALUE_CH2_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_CH2_OFF_X_LARGE or 296
-ISVehicleDashboard.RADIO_VALUE_CH2_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_CH2_OFF_Y_LARGE or 18
-ISVehicleDashboard.RADIO_VALUE_CH3_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_CH3_OFF_X_LARGE or 340
-ISVehicleDashboard.RADIO_VALUE_CH3_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_CH3_OFF_Y_LARGE or 18
-ISVehicleDashboard.RADIO_VALUE_CH4_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_CH4_OFF_X_LARGE or 252
-ISVehicleDashboard.RADIO_VALUE_CH4_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_CH4_OFF_Y_LARGE or 46
-ISVehicleDashboard.RADIO_VALUE_CH5_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_CH5_OFF_X_LARGE or 296
-ISVehicleDashboard.RADIO_VALUE_CH5_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_CH5_OFF_Y_LARGE or 46
-ISVehicleDashboard.RADIO_VALUE_CH6_OFF_X_LARGE = ISVehicleDashboard.RADIO_VALUE_CH6_OFF_X_LARGE or 340
-ISVehicleDashboard.RADIO_VALUE_CH6_OFF_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_CH6_OFF_Y_LARGE or 46
-
-ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_X_LARGE  = ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_X_LARGE  or 124
-ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_Y_LARGE  = ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_Y_LARGE  or 38
-ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_X_LARGE = ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_X_LARGE or -152
-ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_Y_LARGE = ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_Y_LARGE or 38
-
-ISVehicleDashboard.RADIO_VALUE_TEXT_SET_X_LARGE  = ISVehicleDashboard.RADIO_VALUE_TEXT_SET_X_LARGE  or 0
-ISVehicleDashboard.RADIO_VALUE_TEXT_SET_Y_LARGE  = ISVehicleDashboard.RADIO_VALUE_TEXT_SET_Y_LARGE  or 38
 
 -- =========================================================
 -- Helpers
@@ -143,11 +92,61 @@ local function clamp(v, a, b)
     return v
 end
 
-local function ydTex(path)
-    if YourDash and YourDash.GetTexture then
-        return YourDash.GetTexture(path)
+local function ydScale()
+    local scale = YourDash and YourDash.GetScale and tonumber(YourDash.GetScale()) or 1
+    if scale ~= 0.75 and scale ~= 1 and scale ~= 1.4 and scale ~= 2 then
+        return 1
     end
-    return getTexture(path)
+    return scale
+end
+
+local function ydScaled(value, scale)
+    value = tonumber(value) or 0
+    scale = scale or ydScale()
+    local result = value * scale
+    if result < 0 then return math.ceil(result - 0.5) end
+    return math.floor(result + 0.5)
+end
+
+local function ydPack(scale)
+    scale = scale or ydScale()
+    if scale == 0.75 then return "0.75x" end
+    if scale == 1.4 then return "1.4x" end
+    if scale == 2 then return "2x" end
+    return "1x"
+end
+
+local function ydRadioTex(filename)
+    if YourDash and YourDash.GetRadioTexture then
+        local texture = YourDash.GetRadioTexture("standard", filename)
+        if texture then return texture end
+    end
+    return getTexture("media/ui/vehicles/radio/standard/" .. ydPack() .. "/" .. filename)
+end
+
+local function ydUIFont()
+    if YourDash and YourDash.GetUIFont then
+        local font = YourDash.GetUIFont()
+        if font then return font end
+    end
+    return UIFont.Small
+end
+
+local function ydRadioAnchor(dash, layoutKey, fallbackX, fallbackY, scale)
+    local x, y = fallbackX, fallbackY
+    local point = nil
+    if dash and dash._paxGetLayout1x then
+        local ok, layout = pcall(dash._paxGetLayout1x, dash)
+        point = ok and layout and layout.radioStandard or nil
+    elseif YourDash and YourDash.GetLayout then
+        local ok, layout = pcall(YourDash.GetLayout, dash)
+        point = ok and layout and layout[layoutKey] or nil
+    end
+    if type(point) == "table" then
+        x = tonumber(point.x or point[1]) or x
+        y = tonumber(point.y or point[2]) or y
+    end
+    return ydScaled(x, scale), ydScaled(y, scale)
 end
 
 -- Single-player pause lock (MP unaffected)
@@ -571,36 +570,33 @@ end
 -- Build UI
 -- =========================================================
 function ISVehicleDashboard:_ensureValueRadioControls()
-    local wantLarge = (YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures()) == true
+    local wantScale = ydScale()
 
     -- Rebuild/retarget textures if pack changed
-    if self.__radioValueControlsReady and (self.__radioValuePackLarge == wantLarge) then
+    if self.__radioValueControlsReady and (self.__radioValuePackScale == wantScale) then
         return
     end
     self.__radioValueControlsReady = true
-    self.__radioValuePackLarge = wantLarge
+    self.__radioValuePackScale = wantScale
 
-    local base = "media/ui/vehicles/radio_value/"
+    self.__rv_bg_off    = ydRadioTex("radio_background_off.png")
+    self.__rv_bg_on     = ydRadioTex("radio_background_on.png") or self.__rv_bg_off
 
-    -- Load textures (Large->Regular fallback handled by ydTex/YourDash.GetTexture)
-    self.__rv_bg_off    = ydTex(base .. "radio_background_off.png")
-    self.__rv_bg_on     = ydTex(base .. "radio_background_on.png") or self.__rv_bg_off
-
-    self.__rv_pwr_btn   = ydTex(base .. "radio_power_btn.png")
-    self.__rv_vol_up    = ydTex(base .. "radio_vol_up.png")
-    self.__rv_vol_down  = ydTex(base .. "radio_vol_down.png")
-    self.__rv_set_btn   = ydTex(base .. "radio_set_btn.png")
-    self.__rv_freq_up   = ydTex(base .. "radio_freq_up.png")
-    self.__rv_freq_down = ydTex(base .. "radio_freq_down.png")
-    self.__rv_mute_btn  = ydTex(base .. "radio_pause.png") -- reuse pause texture as mute
+    self.__rv_pwr_btn   = ydRadioTex("radio_power_btn.png")
+    self.__rv_vol_up    = ydRadioTex("radio_vol_up.png")
+    self.__rv_vol_down  = ydRadioTex("radio_vol_down.png")
+    self.__rv_set_btn   = ydRadioTex("radio_set_btn.png")
+    self.__rv_freq_up   = ydRadioTex("radio_freq_up.png")
+    self.__rv_freq_down = ydRadioTex("radio_freq_down.png")
+    self.__rv_mute_btn  = ydRadioTex("radio_pause.png") -- reuse pause texture as mute
 
     self.__rv_chan = {
-        ydTex(base .. "radio_chan_1.png"),
-        ydTex(base .. "radio_chan_2.png"),
-        ydTex(base .. "radio_chan_3.png"),
-        ydTex(base .. "radio_chan_4.png"),
-        ydTex(base .. "radio_chan_5.png"),
-        ydTex(base .. "radio_chan_6.png"),
+        ydRadioTex("radio_chan_1.png"),
+        ydRadioTex("radio_chan_2.png"),
+        ydRadioTex("radio_chan_3.png"),
+        ydRadioTex("radio_chan_4.png"),
+        ydRadioTex("radio_chan_5.png"),
+        ydRadioTex("radio_chan_6.png"),
     }
 
     -- Background + text renderer
@@ -623,32 +619,18 @@ function ISVehicleDashboard:_ensureValueRadioControls()
             local dash = self.target
             if not dash then return end
 
-            local useLarge = (dash.__radioValuePackLarge == true)
-            local function pick(reg, large, def)
-                if useLarge then
-                    if large ~= nil then return large end
-                    if reg   ~= nil then return reg end
-                    return def
-                else
-                    if reg   ~= nil then return reg end
-                    if large ~= nil then return large end
-                    return def
-                end
-            end
-
-            local font = useLarge
-                and (dash.RADIO_VALUE_TEXT_FONT_LARGE or dash.RADIO_VALUE_TEXT_FONT or UIFont.Large)
-                or  (dash.RADIO_VALUE_TEXT_FONT or UIFont.Small)
+            local scale = dash.__radioValuePackScale or ydScale()
+            local font = ydUIFont()
             local rgb  = dash.RADIO_VALUE_TEXT_RGB or { r=1, g=1, b=1 }
             local a    = dash.RADIO_VALUE_TEXT_A   or 0.95
 
-            local VOL_X  = pick(dash.RADIO_VALUE_TEXT_VOL_X,  dash.RADIO_VALUE_TEXT_VOL_X_LARGE,  0)
-            local VOL_Y  = pick(dash.RADIO_VALUE_TEXT_VOL_Y,  dash.RADIO_VALUE_TEXT_VOL_Y_LARGE,  0)
-            local FREQ_X = pick(dash.RADIO_VALUE_TEXT_FREQ_X, dash.RADIO_VALUE_TEXT_FREQ_X_LARGE, 0)
-            local FREQ_Y = pick(dash.RADIO_VALUE_TEXT_FREQ_Y, dash.RADIO_VALUE_TEXT_FREQ_Y_LARGE, 0)
+            local VOL_X  = ydScaled(dash.RADIO_VALUE_TEXT_VOL_X or 0, scale)
+            local VOL_Y  = ydScaled(dash.RADIO_VALUE_TEXT_VOL_Y or 0, scale)
+            local FREQ_X = ydScaled(dash.RADIO_VALUE_TEXT_FREQ_X or 0, scale)
+            local FREQ_Y = ydScaled(dash.RADIO_VALUE_TEXT_FREQ_Y or 0, scale)
 
-            local SET_X  = pick(dash.RADIO_VALUE_TEXT_SET_X,  dash.RADIO_VALUE_TEXT_SET_X_LARGE,  0)
-            local SET_Y  = pick(dash.RADIO_VALUE_TEXT_SET_Y,  dash.RADIO_VALUE_TEXT_SET_Y_LARGE,  0)
+            local SET_X  = ydScaled(dash.RADIO_VALUE_TEXT_SET_X or 0, scale)
+            local SET_Y  = ydScaled(dash.RADIO_VALUE_TEXT_SET_Y or 0, scale)
 
             if dash.__radioValueSetArmed == true then
                 self:drawTextCentre("set?",
@@ -818,21 +800,14 @@ function ISVehicleDashboard:_positionValueRadioControls()
     self:_ensureValueRadioControls()
     if not self.valueRadioBG then return end
 
-    local useLarge = (self.__radioValuePackLarge == true)
-    local function pick(reg, large, def)
-        if useLarge then
-            if large ~= nil then return large end
-            if reg   ~= nil then return reg end
-            return def
-        else
-            if reg   ~= nil then return reg end
-            if large ~= nil then return large end
-            return def
-        end
-    end
-
-    local UI_X = pick(self.RADIO_VALUE_UI_X, self.RADIO_VALUE_UI_X_LARGE, 0)
-    local UI_Y = pick(self.RADIO_VALUE_UI_Y, self.RADIO_VALUE_UI_Y_LARGE, 0)
+    local scale = self.__radioValuePackScale or ydScale()
+    local UI_X, UI_Y = ydRadioAnchor(
+        self,
+        "radioStandard",
+        self.RADIO_VALUE_UI_X or 557,
+        self.RADIO_VALUE_UI_Y or 60,
+        scale
+    )
 
     local bx = self.backgroundTex:getX() + UI_X
     local by = self.backgroundTex:getY() + UI_Y
@@ -842,63 +817,63 @@ function ISVehicleDashboard:_positionValueRadioControls()
 
     local function place(img, ox, oy)
         if not img then return end
-        img:setX(bx + (ox or 0))
-        img:setY(by + (oy or 0))
+        img:setX(bx + ydScaled(ox or 0, scale))
+        img:setY(by + ydScaled(oy or 0, scale))
     end
 
     place(self.valueRadioPowerBtn,
-        pick(self.RADIO_VALUE_POWER_OFF_X, self.RADIO_VALUE_POWER_OFF_X_LARGE),
-        pick(self.RADIO_VALUE_POWER_OFF_Y, self.RADIO_VALUE_POWER_OFF_Y_LARGE)
+        self.RADIO_VALUE_POWER_OFF_X,
+        self.RADIO_VALUE_POWER_OFF_Y
     )
     place(self.valueRadioVolDownBtn,
-        pick(self.RADIO_VALUE_VOL_DOWN_OFF_X, self.RADIO_VALUE_VOL_DOWN_OFF_X_LARGE),
-        pick(self.RADIO_VALUE_VOL_DOWN_OFF_Y, self.RADIO_VALUE_VOL_DOWN_OFF_Y_LARGE)
+        self.RADIO_VALUE_VOL_DOWN_OFF_X,
+        self.RADIO_VALUE_VOL_DOWN_OFF_Y
     )
     place(self.valueRadioVolUpBtn,
-        pick(self.RADIO_VALUE_VOL_UP_OFF_X, self.RADIO_VALUE_VOL_UP_OFF_X_LARGE),
-        pick(self.RADIO_VALUE_VOL_UP_OFF_Y, self.RADIO_VALUE_VOL_UP_OFF_Y_LARGE)
+        self.RADIO_VALUE_VOL_UP_OFF_X,
+        self.RADIO_VALUE_VOL_UP_OFF_Y
     )
     place(self.valueRadioSetBtn,
-        pick(self.RADIO_VALUE_SET_OFF_X, self.RADIO_VALUE_SET_OFF_X_LARGE),
-        pick(self.RADIO_VALUE_SET_OFF_Y, self.RADIO_VALUE_SET_OFF_Y_LARGE)
+        self.RADIO_VALUE_SET_OFF_X,
+        self.RADIO_VALUE_SET_OFF_Y
     )
     place(self.valueRadioFreqUpBtn,
-        pick(self.RADIO_VALUE_FREQ_UP_OFF_X, self.RADIO_VALUE_FREQ_UP_OFF_X_LARGE),
-        pick(self.RADIO_VALUE_FREQ_UP_OFF_Y, self.RADIO_VALUE_FREQ_UP_OFF_Y_LARGE)
+        self.RADIO_VALUE_FREQ_UP_OFF_X,
+        self.RADIO_VALUE_FREQ_UP_OFF_Y
     )
     place(self.valueRadioFreqDownBtn,
-        pick(self.RADIO_VALUE_FREQ_DOWN_OFF_X, self.RADIO_VALUE_FREQ_DOWN_OFF_X_LARGE),
-        pick(self.RADIO_VALUE_FREQ_DOWN_OFF_Y, self.RADIO_VALUE_FREQ_DOWN_OFF_Y_LARGE)
+        self.RADIO_VALUE_FREQ_DOWN_OFF_X,
+        self.RADIO_VALUE_FREQ_DOWN_OFF_Y
     )
     place(self.valueRadioMuteBtn,
-        pick(self.RADIO_VALUE_MUTE_OFF_X, self.RADIO_VALUE_MUTE_OFF_X_LARGE),
-        pick(self.RADIO_VALUE_MUTE_OFF_Y, self.RADIO_VALUE_MUTE_OFF_Y_LARGE)
+        self.RADIO_VALUE_MUTE_OFF_X,
+        self.RADIO_VALUE_MUTE_OFF_Y
     )
 
     if self.valueRadioChanBtn then
         place(self.valueRadioChanBtn[1],
-            pick(self.RADIO_VALUE_CH1_OFF_X, self.RADIO_VALUE_CH1_OFF_X_LARGE),
-            pick(self.RADIO_VALUE_CH1_OFF_Y, self.RADIO_VALUE_CH1_OFF_Y_LARGE)
+            self.RADIO_VALUE_CH1_OFF_X,
+            self.RADIO_VALUE_CH1_OFF_Y
         )
         place(self.valueRadioChanBtn[2],
-            pick(self.RADIO_VALUE_CH2_OFF_X, self.RADIO_VALUE_CH2_OFF_X_LARGE),
-            pick(self.RADIO_VALUE_CH2_OFF_Y, self.RADIO_VALUE_CH2_OFF_Y_LARGE)
+            self.RADIO_VALUE_CH2_OFF_X,
+            self.RADIO_VALUE_CH2_OFF_Y
         )
         place(self.valueRadioChanBtn[3],
-            pick(self.RADIO_VALUE_CH3_OFF_X, self.RADIO_VALUE_CH3_OFF_X_LARGE),
-            pick(self.RADIO_VALUE_CH3_OFF_Y, self.RADIO_VALUE_CH3_OFF_Y_LARGE)
+            self.RADIO_VALUE_CH3_OFF_X,
+            self.RADIO_VALUE_CH3_OFF_Y
         )
         place(self.valueRadioChanBtn[4],
-            pick(self.RADIO_VALUE_CH4_OFF_X, self.RADIO_VALUE_CH4_OFF_X_LARGE),
-            pick(self.RADIO_VALUE_CH4_OFF_Y, self.RADIO_VALUE_CH4_OFF_Y_LARGE)
+            self.RADIO_VALUE_CH4_OFF_X,
+            self.RADIO_VALUE_CH4_OFF_Y
         )
         place(self.valueRadioChanBtn[5],
-            pick(self.RADIO_VALUE_CH5_OFF_X, self.RADIO_VALUE_CH5_OFF_X_LARGE),
-            pick(self.RADIO_VALUE_CH5_OFF_Y, self.RADIO_VALUE_CH5_OFF_Y_LARGE)
+            self.RADIO_VALUE_CH5_OFF_X,
+            self.RADIO_VALUE_CH5_OFF_Y
         )
         place(self.valueRadioChanBtn[6],
-            pick(self.RADIO_VALUE_CH6_OFF_X, self.RADIO_VALUE_CH6_OFF_X_LARGE),
-            pick(self.RADIO_VALUE_CH6_OFF_Y, self.RADIO_VALUE_CH6_OFF_Y_LARGE)
+            self.RADIO_VALUE_CH6_OFF_X,
+            self.RADIO_VALUE_CH6_OFF_Y
         )
     end
 end
@@ -1120,28 +1095,4 @@ function ISVehicleDashboard:_updateValueRadioControls()
     self:_positionValueRadioControls()
 end
 
-if ISVehicleDashboard.__YourDashRadioRouterActive then
-    return
-end
--- =========================================================
--- Hooks
--- =========================================================
-local _oldCreateChildren = ISVehicleDashboard.createChildren
-function ISVehicleDashboard:createChildren()
-    if _oldCreateChildren then _oldCreateChildren(self) end
-    self:_ensureValueRadioControls()
-    self:_positionValueRadioControls()
-end
-
-local _oldOnRes = ISVehicleDashboard.onResolutionChange
-function ISVehicleDashboard:onResolutionChange()
-    if _oldOnRes then _oldOnRes(self) end
-    self:_positionValueRadioControls()
-end
-
-local _oldPrerender = ISVehicleDashboard.prerender
-function ISVehicleDashboard:prerender()
-    if _oldPrerender then _oldPrerender(self) end
-    if not self.vehicle or not ISUIHandler.allUIVisible then return end
-    self:_updateValueRadioControls()
-end
+-- Dashboard lifecycle hooks are intentionally owned only by RadioRouter.

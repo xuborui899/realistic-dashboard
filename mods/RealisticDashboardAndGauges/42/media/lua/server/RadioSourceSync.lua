@@ -16,9 +16,7 @@ local function onClientCommand(module, command, playerObj, args)
     if not veh then return end
 
     -- sanity/anti-cheat: sender must be inside the vehicle they’re trying to control
-    if playerObj and playerObj.getVehicle and playerObj:getVehicle() ~= veh then
-        return
-    end
+    if not playerObj or not playerObj.getVehicle or playerObj:getVehicle() ~= veh then return end
 
     -- broadcast to everyone (including sender is fine)
     local players = getOnlinePlayers()

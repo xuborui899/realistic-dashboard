@@ -1,6 +1,7 @@
--- media/lua/client/YourDash/Z_PatchVehicleDashboard_RadioPremium.lua
+-- media/lua/client/Vehicles/ISUI/Z_PatchVehicleDashboard_RadioPremium.lua
 if isServer() then return end
 
+require "YourDash/DashboardCore"
 require "Vehicles/ISUI/ISVehicleDashboard"
 require "ISUI/ISImage"
 require "ISUI/ISPanel"
@@ -8,7 +9,9 @@ require "TimedActions/ISTimedActionQueue"
 require "RadioCom/ISRadioAction"
 require "RadioCom/RadioWindowModules/RWMPanel" -- PresetEntry.new
 require "ISUI/ISContextMenu"
--- require "YourDash/Z_PatchVehicleDashboard_RadioRouter"
+
+if ISVehicleDashboard.__YourDashRadioPremiumLoaded then return end
+ISVehicleDashboard.__YourDashRadioPremiumLoaded = true
 
 -- =========================
 -- Config
@@ -16,58 +19,69 @@ require "ISUI/ISContextMenu"
 
 
 -- OFFSETS ONLY - force apply
-ISVehicleDashboard.RADIO_UI_X = 556
+ISVehicleDashboard.RADIO_UI_X = 531
 ISVehicleDashboard.RADIO_UI_Y = 60
 
-ISVehicleDashboard.RADIO_POWER_OFF_X = 4
+ISVehicleDashboard.RADIO_POWER_OFF_X = 5
 ISVehicleDashboard.RADIO_POWER_OFF_Y = 4
 
-ISVehicleDashboard.RADIO_VOL_DOWN_OFF_X = 24
-ISVehicleDashboard.RADIO_VOL_DOWN_OFF_Y = 22
-ISVehicleDashboard.RADIO_VOL_UP_OFF_X   = 24
-ISVehicleDashboard.RADIO_VOL_UP_OFF_Y   = 5
+ISVehicleDashboard.RADIO_VOL_DOWN_OFF_X = 3
+ISVehicleDashboard.RADIO_VOL_DOWN_OFF_Y = 33
+ISVehicleDashboard.RADIO_VOL_UP_OFF_X   = 3
+ISVehicleDashboard.RADIO_VOL_UP_OFF_Y   = 17
 
-ISVehicleDashboard.RADIO_TUNE_OFF_X = 53
-ISVehicleDashboard.RADIO_TUNE_OFF_Y = 35
+ISVehicleDashboard.RADIO_TUNE_OFF_X = 90
+ISVehicleDashboard.RADIO_TUNE_OFF_Y = 44
 
-ISVehicleDashboard.RADIO_SET_OFF_X = 230
-ISVehicleDashboard.RADIO_SET_OFF_Y = 35
+ISVehicleDashboard.RADIO_SET_OFF_X = 149
+ISVehicleDashboard.RADIO_SET_OFF_Y = 3
 
-ISVehicleDashboard.RADIO_FREQ_UP_OFF_X   = 252
-ISVehicleDashboard.RADIO_FREQ_UP_OFF_Y   = 5
-ISVehicleDashboard.RADIO_FREQ_DOWN_OFF_X = 252
-ISVehicleDashboard.RADIO_FREQ_DOWN_OFF_Y = 22
+ISVehicleDashboard.RADIO_FREQ_UP_OFF_X   = 170
+ISVehicleDashboard.RADIO_FREQ_UP_OFF_Y   = 17
+ISVehicleDashboard.RADIO_FREQ_DOWN_OFF_X = 170
+ISVehicleDashboard.RADIO_FREQ_DOWN_OFF_Y = 33
 
-ISVehicleDashboard.RADIO_SRC_OFF_X = 4
-ISVehicleDashboard.RADIO_SRC_OFF_Y = 26
+ISVehicleDashboard.RADIO_SRC_OFF_X = 62
+ISVehicleDashboard.RADIO_SRC_OFF_Y = 43
 
-ISVehicleDashboard.RADIO_LOAD_OFF_X = 235
-ISVehicleDashboard.RADIO_LOAD_OFF_Y = 3
+ISVehicleDashboard.RADIO_LOAD_OFF_X = 175
+ISVehicleDashboard.RADIO_LOAD_OFF_Y = 5
 
-ISVehicleDashboard.RADIO_PAUSE_OFF_X = 52
-ISVehicleDashboard.RADIO_PAUSE_OFF_Y = 15
+ISVehicleDashboard.RADIO_PAUSE_OFF_X = 116
+ISVehicleDashboard.RADIO_PAUSE_OFF_Y = 43
 
-ISVehicleDashboard.RADIO_CHAN_OFF_X = {80, 105, 130, 155, 180, 205}
-ISVehicleDashboard.RADIO_CHAN_OFF_Y = {36, 36, 36, 36, 36, 36}
+ISVehicleDashboard.RADIO_CHAN_OFF_X = {29, 49, 69, 89, 109, 129}
+ISVehicleDashboard.RADIO_CHAN_OFF_Y = {3, 3, 3, 3, 3, 3}
 
 -- Text positions (relative to radioBG local coords)
-ISVehicleDashboard.RADIO_TEXT_VOL_X  = 82
-ISVehicleDashboard.RADIO_TEXT_VOL_Y  = 15
+ISVehicleDashboard.RADIO_TEXT_VOL_X  = 32
+ISVehicleDashboard.RADIO_TEXT_VOL_Y  = 24
 
-ISVehicleDashboard.RADIO_TEXT_FREQ_X = -35  -- negative = from right edge
-ISVehicleDashboard.RADIO_TEXT_FREQ_Y = 15
+ISVehicleDashboard.RADIO_TEXT_FREQ_X = -32  -- negative = from right edge
+ISVehicleDashboard.RADIO_TEXT_FREQ_Y = 24
 
 ISVehicleDashboard.RADIO_TEXT_NAME_X = 0    -- 0 = centered
-ISVehicleDashboard.RADIO_TEXT_NAME_Y = 15
+ISVehicleDashboard.RADIO_TEXT_NAME_Y = 24
 
 ISVehicleDashboard.RADIO_TEXT_ARMED_X = 0   -- 0 = centered
-ISVehicleDashboard.RADIO_TEXT_ARMED_Y = 15
+ISVehicleDashboard.RADIO_TEXT_ARMED_Y = 24
 
 -- Marquee clip rect (relative to radioBG local coords)
-ISVehicleDashboard.RADIO_TEXT_NAME_CLIP_X = 128
-ISVehicleDashboard.RADIO_TEXT_NAME_CLIP_Y = 12
-ISVehicleDashboard.RADIO_TEXT_NAME_CLIP_W = 58
-ISVehicleDashboard.RADIO_TEXT_NAME_CLIP_H = 24
+-- These are the 1x fallback values.  The renderer narrows this corridor at
+-- runtime from the measured side readouts, which matters at 0.75x where the
+-- font cannot shrink in exact proportion with the artwork.
+ISVehicleDashboard.RADIO_TEXT_NAME_CLIP_X = 53
+ISVehicleDashboard.RADIO_TEXT_NAME_CLIP_Y = 22
+ISVehicleDashboard.RADIO_TEXT_NAME_CLIP_W = 72
+ISVehicleDashboard.RADIO_TEXT_NAME_CLIP_H = 20
+
+-- Safe interior of the exported premium LCD at 1x.  Keeping all generated
+-- text inside this rectangle prevents it spilling onto the bezel.
+ISVehicleDashboard.RADIO_TEXT_LCD_X = 31
+ISVehicleDashboard.RADIO_TEXT_LCD_RIGHT_PAD = 31
+ISVehicleDashboard.RADIO_TEXT_LCD_Y = 22
+ISVehicleDashboard.RADIO_TEXT_LCD_H = 20
+ISVehicleDashboard.RADIO_TEXT_SIDE_GAP = 2
 
 -- Everything else: original defaults (only set if not already set)
 ISVehicleDashboard.RADIO_VOL_STEP = ISVehicleDashboard.RADIO_VOL_STEP or 0.1
@@ -84,78 +98,18 @@ ISVehicleDashboard.RADIO_PRESET_PAD_FREQ   = ISVehicleDashboard.RADIO_PRESET_PAD
 ISVehicleDashboard.RADIO_PRESET_PAD_NAME   = ISVehicleDashboard.RADIO_PRESET_PAD_NAME or " "
 ISVehicleDashboard.RADIO_PRESET_WRITE_NAME = ISVehicleDashboard.RADIO_PRESET_WRITE_NAME or " "
 
--- Text style
-ISVehicleDashboard.RADIO_TEXT_FONT = ISVehicleDashboard.RADIO_TEXT_FONT or UIFont.Small
-ISVehicleDashboard.RADIO_TEXT_FONT_LARGE = ISVehicleDashboard.RADIO_TEXT_FONT_LARGE or UIFont.Large
+-- Text style.  Font size is selected by DashboardCore for the active pack.
 ISVehicleDashboard.RADIO_TEXT_A    = ISVehicleDashboard.RADIO_TEXT_A    or 0.95
 ISVehicleDashboard.RADIO_TEXT_RGB  = ISVehicleDashboard.RADIO_TEXT_RGB  or { r=0.176, g=0.314, b=0.176 }
 
 -- Marquee (rolling) for channel name
 ISVehicleDashboard.RADIO_TEXT_MARQUEE_SPEED_PX_S = ISVehicleDashboard.RADIO_TEXT_MARQUEE_SPEED_PX_S or 15
-ISVehicleDashboard.RADIO_TEXT_MARQUEE_GAP_PX     = ISVehicleDashboard.RADIO_TEXT_MARQUEE_GAP_PX     or 30
+ISVehicleDashboard.RADIO_TEXT_MARQUEE_GAP_PX     = ISVehicleDashboard.RADIO_TEXT_MARQUEE_GAP_PX     or 20
 ISVehicleDashboard.RADIO_TEXT_MARQUEE_DELAY_S    = ISVehicleDashboard.RADIO_TEXT_MARQUEE_DELAY_S    or 2
 
 -- Misc UI timings / strings
 ISVehicleDashboard.RADIO_SET_TIMEOUT_S = ISVehicleDashboard.RADIO_SET_TIMEOUT_S or 10.0
-ISVehicleDashboard.RADIO_LOADING_TEXT = ISVehicleDashboard.RADIO_LOADING_TEXT or "    Loading ..."
-
-ISVehicleDashboard.RADIO_LCD_SCALE = ISVehicleDashboard.RADIO_LCD_SCALE or 1
-
--- =========================
--- Large (2x) offsets (RAW numbers, easy to tune later)
--- =========================
-ISVehicleDashboard.RADIO_UI_X_LARGE = 1112
-ISVehicleDashboard.RADIO_UI_Y_LARGE = 120
-
-ISVehicleDashboard.RADIO_POWER_OFF_X_LARGE = 8
-ISVehicleDashboard.RADIO_POWER_OFF_Y_LARGE = 8
-
-ISVehicleDashboard.RADIO_VOL_DOWN_OFF_X_LARGE = 48
-ISVehicleDashboard.RADIO_VOL_DOWN_OFF_Y_LARGE = 44
-ISVehicleDashboard.RADIO_VOL_UP_OFF_X_LARGE   = 48
-ISVehicleDashboard.RADIO_VOL_UP_OFF_Y_LARGE   = 10
-
-ISVehicleDashboard.RADIO_TUNE_OFF_X_LARGE = 106
-ISVehicleDashboard.RADIO_TUNE_OFF_Y_LARGE = 70
-
-ISVehicleDashboard.RADIO_SET_OFF_X_LARGE = 460
-ISVehicleDashboard.RADIO_SET_OFF_Y_LARGE = 70
-
-ISVehicleDashboard.RADIO_FREQ_UP_OFF_X_LARGE   = 504
-ISVehicleDashboard.RADIO_FREQ_UP_OFF_Y_LARGE   = 10
-ISVehicleDashboard.RADIO_FREQ_DOWN_OFF_X_LARGE = 504
-ISVehicleDashboard.RADIO_FREQ_DOWN_OFF_Y_LARGE = 44
-
-ISVehicleDashboard.RADIO_SRC_OFF_X_LARGE = 8
-ISVehicleDashboard.RADIO_SRC_OFF_Y_LARGE = 52
-
-ISVehicleDashboard.RADIO_LOAD_OFF_X_LARGE = 470
-ISVehicleDashboard.RADIO_LOAD_OFF_Y_LARGE = 6
-
-ISVehicleDashboard.RADIO_PAUSE_OFF_X_LARGE = 104
-ISVehicleDashboard.RADIO_PAUSE_OFF_Y_LARGE = 30
-
-ISVehicleDashboard.RADIO_CHAN_OFF_X_LARGE = {160, 210, 260, 310, 360, 410}
-ISVehicleDashboard.RADIO_CHAN_OFF_Y_LARGE = {72,  72,  72,  72,  72,  72}
-
--- Text positions (relative to radioBG local coords)
-ISVehicleDashboard.RADIO_TEXT_VOL_X_LARGE  = 164
-ISVehicleDashboard.RADIO_TEXT_VOL_Y_LARGE  = 33
-
-ISVehicleDashboard.RADIO_TEXT_FREQ_X_LARGE = -70
-ISVehicleDashboard.RADIO_TEXT_FREQ_Y_LARGE = 33
-
-ISVehicleDashboard.RADIO_TEXT_NAME_X_LARGE = 0
-ISVehicleDashboard.RADIO_TEXT_NAME_Y_LARGE = 33
-
-ISVehicleDashboard.RADIO_TEXT_ARMED_X_LARGE = 0
-ISVehicleDashboard.RADIO_TEXT_ARMED_Y_LARGE = 33
-
--- Marquee clip rect (relative to radioBG local coords)
-ISVehicleDashboard.RADIO_TEXT_NAME_CLIP_X_LARGE = 256
-ISVehicleDashboard.RADIO_TEXT_NAME_CLIP_Y_LARGE = 24
-ISVehicleDashboard.RADIO_TEXT_NAME_CLIP_W_LARGE = 116
-ISVehicleDashboard.RADIO_TEXT_NAME_CLIP_H_LARGE = 48
+ISVehicleDashboard.RADIO_LOADING_TEXT = ISVehicleDashboard.RADIO_LOADING_TEXT or "Loading..."
 
 -- =========================
 -- Helpers
@@ -166,11 +120,70 @@ local function clamp(v, a, b)
     return v
 end
 
-local function ydTex(path)
-    if YourDash and YourDash.GetTexture then
-        return YourDash.GetTexture(path)
+local function ydScale()
+    local scale = YourDash and YourDash.GetScale and tonumber(YourDash.GetScale()) or 1
+    if scale ~= 0.75 and scale ~= 1 and scale ~= 1.4 and scale ~= 2 then
+        return 1
     end
-    return getTexture(path)
+    return scale
+end
+
+local function ydScaled(value, scale)
+    value = tonumber(value) or 0
+    scale = scale or ydScale()
+    local result = value * scale
+    if result < 0 then return math.ceil(result - 0.5) end
+    return math.floor(result + 0.5)
+end
+
+local function ydPack(scale)
+    scale = scale or ydScale()
+    if scale == 0.75 then return "0.75x" end
+    if scale == 1.4 then return "1.4x" end
+    if scale == 2 then return "2x" end
+    return "1x"
+end
+
+local function ydRadioTex(filename)
+    if YourDash and YourDash.GetRadioTexture then
+        local texture = YourDash.GetRadioTexture("premium", filename)
+        if texture then return texture end
+    end
+    return getTexture("media/ui/vehicles/radio/premium/" .. ydPack() .. "/" .. filename)
+end
+
+local function ydUIFont()
+    if YourDash and YourDash.GetUIFont then
+        local font = YourDash.GetUIFont()
+        if font then return font end
+    end
+    return UIFont.Small
+end
+
+-- Side readouts are deliberately one tier smaller than the station/media
+-- name on the larger packs.  A further per-pack zoom keeps the complete VOL
+-- and MHz labels without letting them consume the middle carousel.
+local function ydCompactUIFont(scale)
+    scale = scale or ydScale()
+    if scale >= 1.75 then return UIFont.Medium end
+    return UIFont.NewSmall or UIFont.Small
+end
+
+local function ydRadioAnchor(dash, layoutKey, fallbackX, fallbackY, scale)
+    local x, y = fallbackX, fallbackY
+    local point = nil
+    if dash and dash._paxGetLayout1x then
+        local ok, layout = pcall(dash._paxGetLayout1x, dash)
+        point = ok and layout and layout.radioPremium or nil
+    elseif YourDash and YourDash.GetLayout then
+        local ok, layout = pcall(YourDash.GetLayout, dash)
+        point = ok and layout and layout[layoutKey] or nil
+    end
+    if type(point) == "table" then
+        x = tonumber(point.x or point[1]) or x
+        y = tonumber(point.y or point[2]) or y
+    end
+    return ydScaled(x, scale), ydScaled(y, scale)
 end
 
 -- =========================
@@ -374,7 +387,94 @@ local function measureTextX(font, text)
         return tm:MeasureStringX(font, text)
     end
     -- fallback: rough estimate if MeasureStringX isn't available for some reason
-    return string.len(text) * 6
+    return string.len(text) * ydScaled(6)
+end
+
+local function measureTextHeight(font)
+    local tm = getTextManager and getTextManager() or nil
+    if tm and tm.getFontHeight then
+        return tm:getFontHeight(font)
+    end
+    return ydScaled(16)
+end
+
+local function premiumSideTextZoom(scale, sideFont, lcdHeight)
+    scale = scale or ydScale()
+
+    -- These values keep the side labels visually subordinate to the station
+    -- name while compensating for NewSmall not shrinking with the 0.75x art.
+    local zoom = 0.78
+    if scale <= 0.75 then
+        zoom = 0.62
+    elseif scale >= 1.75 then
+        zoom = 0.82
+    elseif scale >= 1.25 then
+        zoom = 0.90
+    end
+
+    -- Never let a font/locale override make the readout taller than the LCD.
+    local fontHeight = math.max(1, measureTextHeight(sideFont))
+    local heightFit = math.max(0.01, (math.max(1, lcdHeight) - 2) / fontHeight)
+    return math.min(zoom, heightFit)
+end
+
+-- Calculate the middle carousel from the actual rendered widths of the two
+-- side readouts.  A fixed 1x clip scaled down to 0.75x overlaps because the
+-- smallest UI font remains 16 pixels high/wide instead of becoming 0.75x.
+local function premiumLCDGeometry(dash, width, scale, mainFont, left, right)
+    width = tonumber(width) or ydScaled(196, scale)
+    scale = scale or ydScale()
+    mainFont = mainFont or ydUIFont()
+    left = left or ""
+    right = right or ""
+
+    local lcdX = ydScaled(dash.RADIO_TEXT_LCD_X or 31, scale)
+    local lcdRight = width - ydScaled(dash.RADIO_TEXT_LCD_RIGHT_PAD or 31, scale)
+    local lcdY = ydScaled(dash.RADIO_TEXT_LCD_Y or 21, scale)
+    local lcdH = math.max(1, ydScaled(dash.RADIO_TEXT_LCD_H or 24, scale))
+    local sideGap = math.max(1, ydScaled(dash.RADIO_TEXT_SIDE_GAP or 2, scale))
+    local sideFont = ydCompactUIFont(scale)
+    local sideZoom = premiumSideTextZoom(scale, sideFont, lcdH)
+    local leftWidth = math.ceil(measureTextX(sideFont, left) * sideZoom)
+    local rightWidth = math.ceil(measureTextX(sideFont, right) * sideZoom)
+
+    local leftAnchor = ydScaled(dash.RADIO_TEXT_VOL_X or 32, scale)
+    local rightAnchor = width + ydScaled(dash.RADIO_TEXT_FREQ_X or -32, scale)
+    local clipX = lcdX
+    local clipRight = lcdRight
+
+    if left ~= "" then
+        clipX = math.max(clipX, leftAnchor + leftWidth + sideGap)
+    end
+    if right ~= "" then
+        clipRight = math.min(clipRight, rightAnchor - rightWidth - sideGap)
+    end
+
+    -- Defensive fallback for unusual translated fonts.  It remains confined
+    -- to the LCD even if both side strings consume nearly all available room.
+    if clipRight <= clipX then
+        local fallbackX = ydScaled(dash.RADIO_TEXT_NAME_CLIP_X or 53, scale)
+        local fallbackW = math.max(1, ydScaled(dash.RADIO_TEXT_NAME_CLIP_W or 72, scale))
+        clipX = math.max(lcdX, fallbackX)
+        clipRight = math.min(lcdRight, fallbackX + fallbackW)
+        if clipRight <= clipX then clipRight = math.min(lcdRight, clipX + 1) end
+    end
+
+    return {
+        lcdX = lcdX,
+        lcdY = lcdY,
+        lcdW = math.max(1, lcdRight - lcdX),
+        lcdH = lcdH,
+        clipX = clipX,
+        clipY = lcdY,
+        clipW = math.max(1, clipRight - clipX),
+        clipH = lcdH,
+        sideFont = sideFont,
+        sideZoom = sideZoom,
+        leftWidth = leftWidth,
+        rightWidth = rightWidth,
+        mainFont = mainFont,
+    }
 end
 
 
@@ -386,6 +486,12 @@ end
 function ISVehicleDashboard:_radioFmtMHz(freq)
     if not freq then return "—.— MHz" end
     return string.format("%.1f MHz", (freq or 0) / 1000)
+end
+
+function ISVehicleDashboard:_radioFmtMHzCompact(freq, numberOnly)
+    if not freq then return numberOnly and "—.—" or "—.—M" end
+    local value = string.format("%.1f", (freq or 0) / 1000)
+    return numberOnly and value or (value .. "M")
 end
 
 -- Try several ways to get a meaningful “channel name”.
@@ -1326,38 +1432,38 @@ end
 -- Build UI
 -- =========================
 function ISVehicleDashboard:_ensureRadioControls()
-    local wantLarge = (YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures()) == true
+    local wantScale = ydScale()
 
     -- Rebuild/retarget textures if pack changed
-    if self.__radioControlsReady and (self.__radioPackLarge == wantLarge) then
+    if self.__radioControlsReady and (self.__radioPackScale == wantScale) then
         return
     end
     self.__radioControlsReady = true
-    self.__radioPackLarge = wantLarge
+    self.__radioPackScale = wantScale
 
 
-    self.__radio_bg_off   = ydTex("media/ui/vehicles/radio_premium/radio_background_off.png")
-    self.__radio_bg_on    = ydTex("media/ui/vehicles/radio_premium/radio_background_on.png") or self.__radio_bg_off
+    self.__radio_bg_off   = ydRadioTex("radio_background_off.png")
+    self.__radio_bg_on    = ydRadioTex("radio_background_on.png") or self.__radio_bg_off
 
-    self.__radio_pwr_btn  = ydTex("media/ui/vehicles/radio_premium/radio_power_btn.png")
-    self.__radio_vol_up   = ydTex("media/ui/vehicles/radio_premium/radio_vol_up.png")
-    self.__radio_vol_down = ydTex("media/ui/vehicles/radio_premium/radio_vol_down.png")
-    self.__radio_tune_btn = ydTex("media/ui/vehicles/radio_premium/radio_tune_btn.png")
-    self.__radio_set_btn  = ydTex("media/ui/vehicles/radio_premium/radio_set_btn.png")
-    self.__radio_freq_up   = ydTex("media/ui/vehicles/radio_premium/radio_freq_up.png")
-    self.__radio_freq_down = ydTex("media/ui/vehicles/radio_premium/radio_freq_down.png")
-    self.__radio_src_btn   = ydTex("media/ui/vehicles/radio_premium/radio_src.png")
-    self.__radio_load_btn  = ydTex("media/ui/vehicles/radio_premium/radio_load_disk.png")
-    self.__radio_pause_btn = ydTex("media/ui/vehicles/radio_premium/radio_pause.png")
+    self.__radio_pwr_btn  = ydRadioTex("radio_power_btn.png")
+    self.__radio_vol_up   = ydRadioTex("radio_vol_up.png")
+    self.__radio_vol_down = ydRadioTex("radio_vol_down.png")
+    self.__radio_tune_btn = ydRadioTex("radio_tune_btn.png")
+    self.__radio_set_btn  = ydRadioTex("radio_set_btn.png")
+    self.__radio_freq_up   = ydRadioTex("radio_freq_up.png")
+    self.__radio_freq_down = ydRadioTex("radio_freq_down.png")
+    self.__radio_src_btn   = ydRadioTex("radio_src.png")
+    self.__radio_load_btn  = ydRadioTex("radio_load_disk.png")
+    self.__radio_pause_btn = ydRadioTex("radio_pause.png")
 
 
     self.__radio_chan = {
-        ydTex("media/ui/vehicles/radio_premium/radio_chan_1.png"),
-        ydTex("media/ui/vehicles/radio_premium/radio_chan_2.png"),
-        ydTex("media/ui/vehicles/radio_premium/radio_chan_3.png"),
-        ydTex("media/ui/vehicles/radio_premium/radio_chan_4.png"),
-        ydTex("media/ui/vehicles/radio_premium/radio_chan_5.png"),
-        ydTex("media/ui/vehicles/radio_premium/radio_chan_6.png"),
+        ydRadioTex("radio_chan_1.png"),
+        ydRadioTex("radio_chan_2.png"),
+        ydRadioTex("radio_chan_3.png"),
+        ydRadioTex("radio_chan_4.png"),
+        ydRadioTex("radio_chan_5.png"),
+        ydRadioTex("radio_chan_6.png"),
     }
 
     -- If UI already exists, update textures + sizes to match the selected pack
@@ -1403,97 +1509,100 @@ function ISVehicleDashboard:_ensureRadioControls()
             local dash = self.target
             if not dash then return end
 
-            -- Pick regular vs large constants (large uses *_LARGE if present)
-            local useLarge = (dash.__radioPackLarge == true)
-            local function pick(reg, large, def)
-                if useLarge then
-                    if large ~= nil then return large end
-                    if reg   ~= nil then return reg end
-                    return def
-                else
-                    if reg   ~= nil then return reg end
-                    if large ~= nil then return large end
-                    return def
-                end
-            end
-
-            local font = useLarge
-                and (dash.RADIO_TEXT_FONT_LARGE or dash.RADIO_TEXT_FONT or UIFont.Large)
-                or  (dash.RADIO_TEXT_FONT or UIFont.Small)
-
-            local rgb  = dash.RADIO_TEXT_RGB  or { r=1, g=1, b=1 }
-            local a    = dash.RADIO_TEXT_A    or 0.95
-
-            local VOL_X  = pick(dash.RADIO_TEXT_VOL_X,   dash.RADIO_TEXT_VOL_X_LARGE,   0)
-            local VOL_Y  = pick(dash.RADIO_TEXT_VOL_Y,   dash.RADIO_TEXT_VOL_Y_LARGE,   0)
-
-            local FREQ_X = pick(dash.RADIO_TEXT_FREQ_X,  dash.RADIO_TEXT_FREQ_X_LARGE,  0)
-            local FREQ_Y = pick(dash.RADIO_TEXT_FREQ_Y,  dash.RADIO_TEXT_FREQ_Y_LARGE,  0)
-
-            local NAME_X = pick(dash.RADIO_TEXT_NAME_X,  dash.RADIO_TEXT_NAME_X_LARGE,  0)
-            local NAME_Y = pick(dash.RADIO_TEXT_NAME_Y,  dash.RADIO_TEXT_NAME_Y_LARGE,  0)
-
-            local ARMX   = pick(dash.RADIO_TEXT_ARMED_X, dash.RADIO_TEXT_ARMED_X_LARGE, 0)
-            local ARMY   = pick(dash.RADIO_TEXT_ARMED_Y, dash.RADIO_TEXT_ARMED_Y_LARGE, 0)
-
-            local CLIP_X = pick(dash.RADIO_TEXT_NAME_CLIP_X, dash.RADIO_TEXT_NAME_CLIP_X_LARGE, 95)
-            local CLIP_Y = pick(dash.RADIO_TEXT_NAME_CLIP_Y, dash.RADIO_TEXT_NAME_CLIP_Y_LARGE, 12)
-            local CLIP_W = pick(dash.RADIO_TEXT_NAME_CLIP_W, dash.RADIO_TEXT_NAME_CLIP_W_LARGE, 170)
-            local CLIP_H = pick(dash.RADIO_TEXT_NAME_CLIP_H, dash.RADIO_TEXT_NAME_CLIP_H_LARGE, 18)
-
-            if dash.__radioLoading == true then
-                local msg  = dash.RADIO_LOADING_TEXT or "    Loading ..."
-                self:drawTextCentre(
-                    msg,
-                    (self.width * 0.5) + (NAME_X or 0),
-                    (NAME_Y or 0),
-                    rgb.r, rgb.g, rgb.b, a, font
-                )
-                return
-            end
-
+            local scale = dash.__radioPackScale or ydScale()
+            local font = ydUIFont()
             local left  = dash.__radioTextLeft  or ""
             local mid   = dash.__radioTextMid   or ""
             local right = dash.__radioTextRight or ""
             local armed = dash.__radioSetArmed == true
+            local geometry = premiumLCDGeometry(dash, self.width, scale, font, left, right)
+            local fullGeometry = premiumLCDGeometry(dash, self.width, scale, font, "", "")
+            local sideFont = geometry.sideFont
+            local sideZoom = geometry.sideZoom or 1
+            local rgb  = dash.RADIO_TEXT_RGB  or { r=1, g=1, b=1 }
+            local a    = dash.RADIO_TEXT_A    or 0.95
 
-            -- VOL (left-anchored)
+            local VOL_X  = ydScaled(dash.RADIO_TEXT_VOL_X or 0, scale)
+            local VOL_Y  = ydScaled(dash.RADIO_TEXT_VOL_Y or 0, scale)
+
+            local FREQ_X = ydScaled(dash.RADIO_TEXT_FREQ_X or 0, scale)
+            local FREQ_Y = ydScaled(dash.RADIO_TEXT_FREQ_Y or 0, scale)
+
+            local NAME_X = ydScaled(dash.RADIO_TEXT_NAME_X or 0, scale)
+            local NAME_Y = ydScaled(dash.RADIO_TEXT_NAME_Y or 0, scale)
+
+            local ARMX   = ydScaled(dash.RADIO_TEXT_ARMED_X or 0, scale)
+            local ARMY   = ydScaled(dash.RADIO_TEXT_ARMED_Y or 0, scale)
+
+            local CLIP_X, CLIP_Y = geometry.clipX, geometry.clipY
+            local CLIP_W, CLIP_H = geometry.clipW, geometry.clipH
+            local canStencil = (self.setStencilRect ~= nil) and (self.clearStencilRect ~= nil)
+            local sideYOffset = math.floor(math.max(0,
+                (measureTextHeight(font) - measureTextHeight(sideFont) * sideZoom) * 0.5))
+
+            if dash.__radioLoading == true then
+                local msg  = dash.RADIO_LOADING_TEXT or "Loading..."
+                if canStencil then
+                    self:setStencilRect(fullGeometry.lcdX, fullGeometry.lcdY,
+                        fullGeometry.lcdW, fullGeometry.lcdH)
+                end
+                self:drawTextCentre(
+                    msg,
+                    fullGeometry.lcdX + fullGeometry.lcdW * 0.5 + (NAME_X or 0),
+                    (NAME_Y or 0),
+                    rgb.r, rgb.g, rgb.b, a, font
+                )
+                if canStencil then self:clearStencilRect() end
+                return
+            end
+
+            -- Compact side readouts.  They share one LCD stencil so even an
+            -- unexpected frequency value cannot draw onto the bezel.
+            if (left ~= "" or right ~= "") and canStencil then
+                self:setStencilRect(fullGeometry.lcdX, fullGeometry.lcdY,
+                    fullGeometry.lcdW, fullGeometry.lcdH)
+            end
             if left ~= "" then
-                self:drawText(
+                self:drawTextZoomed(
                     left,
                     VOL_X,
-                    VOL_Y,
-                    rgb.r, rgb.g, rgb.b, a, font
+                    VOL_Y + sideYOffset,
+                    sideZoom, rgb.r, rgb.g, rgb.b, a, sideFont
                 )
             end
 
-            -- FREQ (right-anchored; FREQ_X is offset from right edge; can be negative)
             if right ~= "" then
-                self:drawTextRight(
+                local rightWidth = geometry.rightWidth or
+                    math.ceil(measureTextX(sideFont, right) * sideZoom)
+                self:drawTextZoomed(
                     right,
-                    self.width + (FREQ_X or 0),
-                    FREQ_Y,
-                    rgb.r, rgb.g, rgb.b, a, font
+                    self.width + (FREQ_X or 0) - rightWidth,
+                    FREQ_Y + sideYOffset,
+                    sideZoom, rgb.r, rgb.g, rgb.b, a, sideFont
                 )
             end
+            if (left ~= "" or right ~= "") and canStencil then self:clearStencilRect() end
 
             -- CENTER: channel name OR armed message
             if armed then
                 if mid ~= "" then
+                    if canStencil then
+                        self:setStencilRect(fullGeometry.lcdX, fullGeometry.lcdY,
+                            fullGeometry.lcdW, fullGeometry.lcdH)
+                    end
                     self:drawTextCentre(
                         mid,
-                        (self.width * 0.5) + (ARMX or 0),
+                        fullGeometry.lcdX + fullGeometry.lcdW * 0.5 + (ARMX or 0),
                         (ARMY or 0),
                         rgb.r, rgb.g, rgb.b, a, font
                     )
+                    if canStencil then self:clearStencilRect() end
                 end
             else
                 if mid ~= "" then
-                    local canStencil = (self.setStencilRect ~= nil) and (self.clearStencilRect ~= nil)
-
                     if dash.__radioMarqueeText == mid then
                         -- Marquee mode (left-anchored inside clip box)
-                        local gap = dash.RADIO_TEXT_MARQUEE_GAP_PX or 30
+                        local gap = ydScaled(dash.RADIO_TEXT_MARQUEE_GAP_PX or 20, scale)
                         local off = dash.__radioMarqueeOffset or 0
                         local tw  = dash.__radioMarqueeW or measureTextX(font, mid)
 
@@ -1643,40 +1752,14 @@ function ISVehicleDashboard:_positionRadioControls()
     self:_ensureRadioControls()
     if not self.radioBG then return end
 
-    local useLarge = (YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures()) == true
-    local function pick(a, b) return useLarge and (b ~= nil and b or a) or a end
-
-    local UI_X = pick(self.RADIO_UI_X, self.RADIO_UI_X_LARGE) or 0
-    local UI_Y = pick(self.RADIO_UI_Y, self.RADIO_UI_Y_LARGE) or 0
-
-    local PWR_X = pick(self.RADIO_POWER_OFF_X, self.RADIO_POWER_OFF_X_LARGE)
-    local PWR_Y = pick(self.RADIO_POWER_OFF_Y, self.RADIO_POWER_OFF_Y_LARGE)
-
-    local VDN_X = pick(self.RADIO_VOL_DOWN_OFF_X, self.RADIO_VOL_DOWN_OFF_X_LARGE)
-    local VDN_Y = pick(self.RADIO_VOL_DOWN_OFF_Y, self.RADIO_VOL_DOWN_OFF_Y_LARGE)
-    local VUP_X = pick(self.RADIO_VOL_UP_OFF_X,   self.RADIO_VOL_UP_OFF_X_LARGE)
-    local VUP_Y = pick(self.RADIO_VOL_UP_OFF_Y,   self.RADIO_VOL_UP_OFF_Y_LARGE)
-
-    local TUNE_X = pick(self.RADIO_TUNE_OFF_X, self.RADIO_TUNE_OFF_X_LARGE)
-    local TUNE_Y = pick(self.RADIO_TUNE_OFF_Y, self.RADIO_TUNE_OFF_Y_LARGE)
-
-    local SET_X = pick(self.RADIO_SET_OFF_X, self.RADIO_SET_OFF_X_LARGE)
-    local SET_Y = pick(self.RADIO_SET_OFF_Y, self.RADIO_SET_OFF_Y_LARGE)
-
-    local FU_X = pick(self.RADIO_FREQ_UP_OFF_X, self.RADIO_FREQ_UP_OFF_X_LARGE)
-    local FU_Y = pick(self.RADIO_FREQ_UP_OFF_Y, self.RADIO_FREQ_UP_OFF_Y_LARGE)
-    local FD_X = pick(self.RADIO_FREQ_DOWN_OFF_X, self.RADIO_FREQ_DOWN_OFF_X_LARGE)
-    local FD_Y = pick(self.RADIO_FREQ_DOWN_OFF_Y, self.RADIO_FREQ_DOWN_OFF_Y_LARGE)
-
-    local SRC_X  = pick(self.RADIO_SRC_OFF_X,  self.RADIO_SRC_OFF_X_LARGE)
-    local SRC_Y  = pick(self.RADIO_SRC_OFF_Y,  self.RADIO_SRC_OFF_Y_LARGE)
-    local LOAD_X = pick(self.RADIO_LOAD_OFF_X, self.RADIO_LOAD_OFF_X_LARGE)
-    local LOAD_Y = pick(self.RADIO_LOAD_OFF_Y, self.RADIO_LOAD_OFF_Y_LARGE)
-    local PAU_X  = pick(self.RADIO_PAUSE_OFF_X, self.RADIO_PAUSE_OFF_X_LARGE)
-    local PAU_Y  = pick(self.RADIO_PAUSE_OFF_Y, self.RADIO_PAUSE_OFF_Y_LARGE)
-
-    local CHX = useLarge and self.RADIO_CHAN_OFF_X_LARGE or self.RADIO_CHAN_OFF_X
-    local CHY = useLarge and self.RADIO_CHAN_OFF_Y_LARGE or self.RADIO_CHAN_OFF_Y
+    local scale = self.__radioPackScale or ydScale()
+    local UI_X, UI_Y = ydRadioAnchor(
+        self,
+        "radioPremium",
+        self.RADIO_UI_X or 531,
+        self.RADIO_UI_Y or 60,
+        scale
+    )
 
     local bx = self.backgroundTex:getX() + UI_X
     local by = self.backgroundTex:getY() + UI_Y
@@ -1687,25 +1770,27 @@ function ISVehicleDashboard:_positionRadioControls()
 
     local function place(img, ox, oy)
         if not img then return end
-        img:setX(bx + (ox or 0))
-        img:setY(by + (oy or 0))
+        img:setX(bx + ydScaled(ox or 0, scale))
+        img:setY(by + ydScaled(oy or 0, scale))
     end
 
-    place(self.radioPowerBtn,    PWR_X,  PWR_Y)
-    place(self.radioVolDownBtn,  VDN_X,  VDN_Y)
-    place(self.radioVolUpBtn,    VUP_X,  VUP_Y)
-    place(self.radioTuneBtn,     TUNE_X, TUNE_Y)
-    place(self.radioSetBtn,      SET_X,  SET_Y)
-    place(self.radioFreqUpBtn,   FU_X,   FU_Y)
-    place(self.radioFreqDownBtn, FD_X,   FD_Y)
-    place(self.radioSrcBtn,      SRC_X,  SRC_Y)
-    place(self.radioLoadDiskBtn, LOAD_X, LOAD_Y)
-    place(self.radioPauseBtn,    PAU_X,  PAU_Y)
+    place(self.radioPowerBtn,    self.RADIO_POWER_OFF_X,    self.RADIO_POWER_OFF_Y)
+    place(self.radioVolDownBtn,  self.RADIO_VOL_DOWN_OFF_X, self.RADIO_VOL_DOWN_OFF_Y)
+    place(self.radioVolUpBtn,    self.RADIO_VOL_UP_OFF_X,   self.RADIO_VOL_UP_OFF_Y)
+    place(self.radioTuneBtn,     self.RADIO_TUNE_OFF_X,     self.RADIO_TUNE_OFF_Y)
+    place(self.radioSetBtn,      self.RADIO_SET_OFF_X,      self.RADIO_SET_OFF_Y)
+    place(self.radioFreqUpBtn,   self.RADIO_FREQ_UP_OFF_X,  self.RADIO_FREQ_UP_OFF_Y)
+    place(self.radioFreqDownBtn, self.RADIO_FREQ_DOWN_OFF_X,self.RADIO_FREQ_DOWN_OFF_Y)
+    place(self.radioSrcBtn,      self.RADIO_SRC_OFF_X,      self.RADIO_SRC_OFF_Y)
+    place(self.radioLoadDiskBtn, self.RADIO_LOAD_OFF_X,     self.RADIO_LOAD_OFF_Y)
+    place(self.radioPauseBtn,    self.RADIO_PAUSE_OFF_X,    self.RADIO_PAUSE_OFF_Y)
 
     if self.radioChanBtn then
         for i = 1, 6 do
             local img = self.radioChanBtn[i]
-            if img then place(img, CHX[i], CHY[i]) end
+            if img then
+                place(img, self.RADIO_CHAN_OFF_X[i], self.RADIO_CHAN_OFF_Y[i])
+            end
         end
     end
 
@@ -1810,7 +1895,7 @@ function ISVehicleDashboard:_updateRadioControls()
     self.__radioNoMarquee = false
 
     local supportsMedia = self:_radioSupportsMedia(dd)
-    
+
     local sharedSource = self:_ydGetSharedRadioSource()
     if sharedSource and sharedSource ~= self.__radioSource then
         self.__radioSource = sharedSource
@@ -1937,6 +2022,8 @@ function ISVehicleDashboard:_updateRadioControls()
     self.__radioTextRight = ""
 
     local curF = dd.getChannel and dd:getChannel() or nil
+    local displayScale = self.__radioPackScale or ydScale()
+    local smallestDisplay = displayScale == 0.75
 
     -- defaults
     self.__radioTextLeft  = ""
@@ -1957,7 +2044,7 @@ function ISVehicleDashboard:_updateRadioControls()
 
             if self.__radioSource == "cd" and supportsMedia then
                 -- CD source
-                self.__radioTextRight = "CD  "   -- show at the freq location
+                self.__radioTextRight = "CD"   -- show at the freq location
 
                 if dd.hasMedia and dd:hasMedia() then
                     local cdPlaying = (dd.isPlayingMedia and dd:isPlayingMedia() == true)
@@ -1966,11 +2053,11 @@ function ISVehicleDashboard:_updateRadioControls()
                     if cdPlaying then
                         self.__radioTextMid = self:_radioGetLoadedMediaName(dd) or "DISC"
                     else
-                        self.__radioTextMid = "  CD PAUSED"
+                        self.__radioTextMid = smallestDisplay and "PAUSED" or "CD PAUSED"
                         self.__radioNoMarquee = true
                     end
                 else
-                    self.__radioTextMid = "  NO DISC"
+                    self.__radioTextMid = smallestDisplay and "NODISC" or "NO DISC"
                     self.__radioNoMarquee = true
                 end
             else
@@ -2005,17 +2092,13 @@ function ISVehicleDashboard:_updateRadioControls()
             self.__radioMarqueeDelayT = 0
             self.__radioMarqueeW      = 0
         else
-        local useLarge = (self.__radioPackLarge == true)
-
-        local font = useLarge
-            and (self.RADIO_TEXT_FONT_LARGE or self.RADIO_TEXT_FONT or UIFont.Large)
-            or  (self.RADIO_TEXT_FONT or UIFont.Small)
-
-        local clipW = useLarge
-            and (self.RADIO_TEXT_NAME_CLIP_W_LARGE or self.RADIO_TEXT_NAME_CLIP_W or 170)
-            or  (self.RADIO_TEXT_NAME_CLIP_W or 170)
-
-        local w = measureTextX(font, mid)
+            local scale = self.__radioPackScale or ydScale()
+            local font = ydUIFont()
+            local radioWidth = self.radioBG and self.radioBG:getWidth() or ydScaled(196, scale)
+            local geometry = premiumLCDGeometry(self, radioWidth, scale, font,
+                self.__radioTextLeft or "", self.__radioTextRight or "")
+            local clipW = geometry.clipW
+            local w = measureTextX(font, mid)
 
 
             if w > clipW then
@@ -2033,8 +2116,8 @@ function ISVehicleDashboard:_updateRadioControls()
                 self.__radioMarqueeDelayT = (self.__radioMarqueeDelayT or 0) + dtm
 
                 if (self.__radioMarqueeDelayT or 0) >= delay then
-                    local speed = self.RADIO_TEXT_MARQUEE_SPEED_PX_S or 35
-                    local gap   = self.RADIO_TEXT_MARQUEE_GAP_PX or 30
+                    local speed = ydScaled(self.RADIO_TEXT_MARQUEE_SPEED_PX_S or 15, scale)
+                    local gap   = ydScaled(self.RADIO_TEXT_MARQUEE_GAP_PX or 20, scale)
 
                     self.__radioMarqueeOffset = (self.__radioMarqueeOffset or 0) + speed * dtm
 
@@ -2223,28 +2306,4 @@ end
         self:_positionRadioControls()
     end
 
-if ISVehicleDashboard.__YourDashRadioRouterActive then
-    return
-end
--- =========================
--- Hooks
--- =========================
-local _oldCreateChildren = ISVehicleDashboard.createChildren
-function ISVehicleDashboard:createChildren()
-    if _oldCreateChildren then _oldCreateChildren(self) end
-    self:_ensureRadioControls()
-    self:_positionRadioControls()
-end
-
-local _oldOnRes = ISVehicleDashboard.onResolutionChange
-function ISVehicleDashboard:onResolutionChange()
-    if _oldOnRes then _oldOnRes(self) end
-    self:_positionRadioControls()
-end
-
-local _oldPrerender = ISVehicleDashboard.prerender
-function ISVehicleDashboard:prerender()
-    if _oldPrerender then _oldPrerender(self) end
-    if not self.vehicle or not ISUIHandler.allUIVisible then return end
-    self:_updateRadioControls()
-end
+-- Dashboard lifecycle hooks are intentionally owned only by RadioRouter.

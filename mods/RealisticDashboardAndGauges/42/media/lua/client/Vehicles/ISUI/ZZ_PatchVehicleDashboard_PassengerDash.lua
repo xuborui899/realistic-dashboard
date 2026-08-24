@@ -6,53 +6,76 @@ require "ISUI/ISImage"
 require "Vehicles/ISUI/ISVehicleDashboard"
 require "Vehicles/ISUI/ISVehiclePartMenu"
 require "Vehicles/VehicleUtils"
+require "YourDash/DashboardCore"
 
--- Ensure AC functions exist (guard in that file prevents double-patch)
-pcall(function() require "YourDash/Z_PatchVehicleDashboard_AC" end)
+-- Ensure AC functions exist (guard in that file prevents double-patch).
+pcall(function() require "Vehicles/ISUI/Z_PatchVehicleDashboard_AC" end)
+-- Sport passenger controls resolve the driver's proven rotary/text handlers at
+-- UI-creation time.  RadioRouter owns the deterministic ZZZ sport-patch load
+-- order, so do not pull it forward from this later passenger module.
 
 -- Guard: don’t load twice
 if ISVehicleDashboard.__YourDashPassengerDashLoaded then return end
 ISVehicleDashboard.__YourDashPassengerDashLoaded = true
 
--- =========================
--- YourDash texture helper fallback (if driver file hasn't defined it yet)
--- =========================
 YourDash = YourDash or {}
 
-if not YourDash.UseLargeTextures then
-    YourDash._useLargeTextures = YourDash._useLargeTextures or false
-    function YourDash.UseLargeTextures()
-        return YourDash._useLargeTextures == true
+local function paxScale()
+    local value = YourDash.GetScale and tonumber(YourDash.GetScale()) or 1
+    if value ~= 0.75 and value ~= 1 and value ~= 1.4 and value ~= 2 then
+        return 1
+    end
+    return value
+end
+
+local function paxScaleKey()
+    return YourDash.GetScaleKey and YourDash.GetScaleKey() or "1x"
+end
+
+local function paxScaled(value, scale)
+    value = (tonumber(value) or 0) * (scale or paxScale())
+    if value < 0 then return math.ceil(value - 0.5) end
+    return math.floor(value + 0.5)
+end
+
+local function paxRawTexture(path)
+    if not path or not getTexture then return nil end
+    local ok, texture = pcall(getTexture, path)
+    if ok then return texture end
+    return nil
+end
+
+local function paxSafeCall(object, methodName, ...)
+    if object == nil then return nil end
+    local okMethod, method = pcall(function() return object[methodName] end)
+    if not okMethod or type(method) ~= "function" then return nil end
+    local ok, value = pcall(method, object, ...)
+    if ok then return value end
+    return nil
+end
+
+local function paxSetMouseTransparent(element)
+    if not element then return end
+    element.wantMouseEvents = false
+    if element.setWantMouseEvents then
+        element:setWantMouseEvents(false)
+    elseif element.javaObject and element.javaObject.setConsumeMouseEvents then
+        element.javaObject:setConsumeMouseEvents(false)
     end
 end
 
-if not YourDash._toLargePath then
-    function YourDash._toLargePath(path)
-        if not path then return nil end
-        if string.find(path, "/large/", 1, true) then return path end
-        return (string.gsub(path, "(.*/)([^/]+)$", "%1large/%2"))
-    end
-end
+local PAX_SPORT_AC_RAW_LEVELS = { -25, -15, -8, 0, 8, 15, 25 }
 
-if not YourDash.GetTexture then
-    function YourDash.GetTexture(path, fallbackPath)
-        if not path then return nil end
-        if YourDash.UseLargeTextures() then
-            local lp = YourDash._toLargePath(path)
-            local t = lp and getTexture(lp) or nil
-            if t then return t end
-
-            if fallbackPath then
-                local lpf = YourDash._toLargePath(fallbackPath)
-                t = lpf and getTexture(lpf) or nil
-                if t then return t end
-            end
+local function paxNearestSportTempIndex(value)
+    value = tonumber(value) or 0
+    local bestIndex, bestDistance = 1, math.huge
+    for index = 1, #PAX_SPORT_AC_RAW_LEVELS do
+        local distance = math.abs(value - PAX_SPORT_AC_RAW_LEVELS[index])
+        if distance < bestDistance then
+            bestIndex, bestDistance = index, distance
         end
-
-        local t = getTexture(path)
-        if (not t) and fallbackPath then t = getTexture(fallbackPath) end
-        return t
     end
+    return bestIndex
 end
 
 -- =========================================================
@@ -62,158 +85,209 @@ YourDashPassengerDashboard = ISVehicleDashboard:derive("YourDashPassengerDashboa
 YourDashPassengerDashboard.instances = YourDashPassengerDashboard.instances or {}
 
 -- =========================
--- Config (tune these)
+-- Config.  All positions are authored against each family's 1x passenger art.
 -- =========================
 
--- Background textures
-YourDashPassengerDashboard.PAX_BG_EXPANDED   = "media/ui/vehicles/passenger/passenger_dash.png"
-YourDashPassengerDashboard.PAX_BG_RETRACTED  = "media/ui/vehicles/passenger/passenger_retracted.png"
-
--- Toggle button textures
+-- These two legacy toggles are intentionally the only passenger assets kept
+-- at the old shared path.  They are rendered at the active scale below.
 YourDashPassengerDashboard.PAX_BTN_RETRACT   = "media/ui/vehicles/passenger/btn_retract.png"
 YourDashPassengerDashboard.PAX_BTN_EXPAND    = "media/ui/vehicles/passenger/btn_expand.png"
 
 -- Seat policy: show ONLY for seat index 1 by default (front passenger)
 YourDashPassengerDashboard.PAX_SEAT_INDEX = 1
 
--- Positioning
 YourDashPassengerDashboard.PAX_OFFSET_X = 0      -- +right / -left
 YourDashPassengerDashboard.PAX_OFFSET_Y = 0      -- +down / -up (after bar offset)
-YourDashPassengerDashboard.PAX_BAR_PAD   = 10    -- extra pixels above the item/hotbar
-YourDashPassengerDashboard.PAX_BAR_FALLBACK_H = 70 -- used if we can't detect bar height
-
--- Toggle button placement (relative to background local coords)
--- Supports negative: -10 means "10px from right/bottom edge"
-YourDashPassengerDashboard.PAX_TOGGLE_X = 22
-YourDashPassengerDashboard.PAX_TOGGLE_Y = 18
-
--- Door + window buttons placement (relative to background local coords)
-YourDashPassengerDashboard.PAX_DOOR_X   = 214
-YourDashPassengerDashboard.PAX_DOOR_Y   = 98
-YourDashPassengerDashboard.PAX_WINDOW_X = 244
-YourDashPassengerDashboard.PAX_WINDOW_Y = 89
-
--- Passenger-specific AC placement (instance fields override global defaults)
-YourDashPassengerDashboard.PAX_AC_FAN_X         = 24
-YourDashPassengerDashboard.PAX_AC_FAN_Y         = 98
-YourDashPassengerDashboard.PAX_AC_SLIDER_X      = 57
-YourDashPassengerDashboard.PAX_AC_SLIDER_Y      = 105
-YourDashPassengerDashboard.PAX_AC_SLIDER_TRAVEL = 127
-
--- Passenger-specific radio placement (instance fields override global defaults)
--- Premium radio uses RADIO_UI_X/Y; Value radio uses RADIO_VALUE_UI_X/Y
-YourDashPassengerDashboard.PAX_RADIO_UI_X       = 10
-YourDashPassengerDashboard.PAX_RADIO_UI_Y       = 35
-YourDashPassengerDashboard.PAX_RADIO_VALUE_UI_X = 50
-YourDashPassengerDashboard.PAX_RADIO_VALUE_UI_Y = 30
 
 YourDashPassengerDashboard.PAX_TIP_RETRACT = "collapse passenger dash"
 YourDashPassengerDashboard.PAX_TIP_EXPAND  = "expand passenger dash"
 
--- =========================
--- 2x ("large") offsets (RAW numbers, easy to tune later)
--- =========================
-YourDashPassengerDashboard.PAX_OFFSET_X_LARGE = YourDashPassengerDashboard.PAX_OFFSET_X_LARGE or 0
-YourDashPassengerDashboard.PAX_OFFSET_Y_LARGE = YourDashPassengerDashboard.PAX_OFFSET_Y_LARGE or 0
+YourDashPassengerDashboard.PAX_LAYOUTS_1X = {
+    standard = {
+        toggle = { x = 22, y = 18 },
+        door = { x = 168, y = 102 },
+        window = { x = 198, y = 93 },
+        ac = {
+            fan = { x = 24, y = 98 },
+            slider = { x = 57, y = 105, travel = 86 },
+        },
+        radioPremium = { x = 10, y = 35 },
+        radioStandard = { x = 50, y = 30 },
+        barPad = 10,
+        barFallback = 70,
+    },
+    heavy = {
+        toggle = { x = 5, y = 5 },
+        door = { x = 170, y = 85 },
+        window = { x = 204, y = 72 },
+        ac = {
+            background = { x = 1, y = 68 },
+            fan = { x = 22, y = 69 },
+            -- Center the handle on the black rail; y=92 placed it over COLD/HOT.
+            slider = { x = 45, y = 74, travel = 91 },
+        },
+        -- Lift each exact-size radio just enough to clear the baked window
+        -- glyph while preserving the requested right-side horizontal alignment.
+        radioPremium = { x = 31, y = -3 },
+        radioStandard = { x = 54, y = 7 },
+        barPad = 10,
+        barFallback = 70,
+    },
+    sport = {
+        toggle = { x = 5, y = 8 },
+        door = { x = 168, y = 90 },
+        doorLED = { x = 173, y = 125 },
+        window = { x = 194, y = 78 },
+        -- The red passenger export is the tightest canvas (227x137 at 1x),
+        -- so the complete climate/clock row is authored to that boundary.
+        ac = {
+            background = { x = 1, y = 77 },
+            display = { x = 8, y = 80, width = 31, height = 23, textOffsetX = 2 },
+            fan = { x = 10, y = 104 },
+            displayButton = { x = 10, y = 120 },
+            knob = { x = 49, y = 90 },
+        },
+        clock = { x = 108, y = 80 },
+        -- Both tiers end at x=223 at 1x, inside even the 227px red panel.
+        radioPremium = { x = 27, y = 8 },
+        radioStandard = { x = 50, y = 12 },
+        barPad = 10,
+        barFallback = 70,
+    },
+}
 
-YourDashPassengerDashboard.PAX_BAR_PAD_LARGE         = YourDashPassengerDashboard.PAX_BAR_PAD_LARGE         or 20
-YourDashPassengerDashboard.PAX_BAR_FALLBACK_H_LARGE  = YourDashPassengerDashboard.PAX_BAR_FALLBACK_H_LARGE  or 140
+function YourDashPassengerDashboard:_paxGetLayout1x()
+    local family = self.__YourDashFamily or "standard"
+    return self.PAX_LAYOUTS_1X[family] or self.PAX_LAYOUTS_1X.standard
+end
 
-YourDashPassengerDashboard.PAX_TOGGLE_X_LARGE = YourDashPassengerDashboard.PAX_TOGGLE_X_LARGE or 44
-YourDashPassengerDashboard.PAX_TOGGLE_Y_LARGE = YourDashPassengerDashboard.PAX_TOGGLE_Y_LARGE or 36
+function YourDashPassengerDashboard:_paxSetToggleTexture(texture)
+    local button = self.paxToggleBtn
+    if not button or not texture then return end
+    button.texture = texture
+    local scale = self.__YourDashScale or paxScale()
+    button:setWidth(paxScaled(texture:getWidthOrig(), scale))
+    button:setHeight(paxScaled(texture:getHeightOrig(), scale))
+end
 
-YourDashPassengerDashboard.PAX_DOOR_X_LARGE   = YourDashPassengerDashboard.PAX_DOOR_X_LARGE   or 428
-YourDashPassengerDashboard.PAX_DOOR_Y_LARGE   = YourDashPassengerDashboard.PAX_DOOR_Y_LARGE   or 196
-YourDashPassengerDashboard.PAX_WINDOW_X_LARGE = YourDashPassengerDashboard.PAX_WINDOW_X_LARGE or 488
-YourDashPassengerDashboard.PAX_WINDOW_Y_LARGE = YourDashPassengerDashboard.PAX_WINDOW_Y_LARGE or 178
+function YourDashPassengerDashboard:_paxApplyTexturePack(profile, isInit)
+    profile = profile or (self.vehicle and YourDash.GetVehicleProfile(self.vehicle)) or {
+        family = "standard", accent = "base",
+    }
 
-YourDashPassengerDashboard.PAX_AC_FAN_X_LARGE         = YourDashPassengerDashboard.PAX_AC_FAN_X_LARGE         or 48
-YourDashPassengerDashboard.PAX_AC_FAN_Y_LARGE         = YourDashPassengerDashboard.PAX_AC_FAN_Y_LARGE         or 196
-YourDashPassengerDashboard.PAX_AC_SLIDER_X_LARGE      = YourDashPassengerDashboard.PAX_AC_SLIDER_X_LARGE      or 114
-YourDashPassengerDashboard.PAX_AC_SLIDER_Y_LARGE      = YourDashPassengerDashboard.PAX_AC_SLIDER_Y_LARGE      or 210
-YourDashPassengerDashboard.PAX_AC_SLIDER_TRAVEL_LARGE = YourDashPassengerDashboard.PAX_AC_SLIDER_TRAVEL_LARGE or 254
+    local family = profile.family or "standard"
+    if family ~= "standard" and family ~= "heavy" and family ~= "sport" then
+        family = "standard"
+    end
+    local accent = profile.accent or "base"
+    if accent ~= "base" and accent ~= "lux" and accent ~= "sport" then accent = "base" end
+    if family ~= "sport" then accent = "base" end
 
-YourDashPassengerDashboard.PAX_RADIO_UI_X_LARGE       = YourDashPassengerDashboard.PAX_RADIO_UI_X_LARGE       or 20
-YourDashPassengerDashboard.PAX_RADIO_UI_Y_LARGE       = YourDashPassengerDashboard.PAX_RADIO_UI_Y_LARGE       or 70
-YourDashPassengerDashboard.PAX_RADIO_VALUE_UI_X_LARGE = YourDashPassengerDashboard.PAX_RADIO_VALUE_UI_X_LARGE or 100
-YourDashPassengerDashboard.PAX_RADIO_VALUE_UI_Y_LARGE = YourDashPassengerDashboard.PAX_RADIO_VALUE_UI_Y_LARGE or 60
+    local scale = paxScale()
+    local scaleKey = paxScaleKey()
+    local packKey = family .. ":" .. accent .. ":" .. scaleKey
 
-function YourDashPassengerDashboard:_paxApplyTexturePack(useLarge, isInit)
-    useLarge = (useLarge == true)
-    self.__YourDashLarge = useLarge
+    self.__YourDashFamily = family
+    self.__YourDashAccent = accent
+    self.__YourDashScale = scale
+    self.__YourDashScaleKey = scaleKey
+    self.__YourDashLarge = scaleKey == "2x" -- compatibility only; no layout depends on it
+    self.__paxPackKey = packKey
 
-    local function tex(path, fallback)
-        return YourDash.GetTexture(path, fallback)
+    local expandedName = "passenger_dash.png"
+    local retractedName = "passenger_retracted.png"
+    if family == "sport" then
+        expandedName = "passenger_dash_" .. accent .. ".png"
+        retractedName = "passenger_retracted_" .. accent .. ".png"
     end
 
-    -- Passenger background + toggle textures (auto-try /large/)
-    self.__pax_bg_expanded  = tex(self.PAX_BG_EXPANDED)
-    self.__pax_bg_retracted = tex(self.PAX_BG_RETRACTED) or self.__pax_bg_expanded
-
-    self.__pax_btn_retract  = tex(self.PAX_BTN_RETRACT)
-    self.__pax_btn_expand   = tex(self.PAX_BTN_EXPAND) or self.__pax_btn_retract
-
-    -- Reused textures (auto-try /large/)
-    self.__lock_off     = tex("media/ui/vehicles/lock_off.png")
-    self.__lock_partial = tex("media/ui/vehicles/lock_partial.png") or self.__lock_off
-    self.__lock_on      = tex("media/ui/vehicles/lock_on.png")      or self.__lock_off
-
-    self.__window_switch      = tex("media/ui/vehicles/window_switch.png")
-    self.__window_switch_push = tex("media/ui/vehicles/window_switch_push.png") or self.__window_switch
-    self.__window_switch_pull = tex("media/ui/vehicles/window_switch_pull.png") or self.__window_switch
-
-
-    -- IMPORTANT: override BOTH reg + large fields so passenger doesn't inherit driver offsets
-
-    -- AC anchors (used by AC patch pick(reg, large))
-    self.AC_FAN_X         = self.PAX_AC_FAN_X
-    self.AC_FAN_Y         = self.PAX_AC_FAN_Y
-    self.AC_SLIDER_X      = self.PAX_AC_SLIDER_X
-    self.AC_SLIDER_Y      = self.PAX_AC_SLIDER_Y
-    self.AC_SLIDER_TRAVEL = self.PAX_AC_SLIDER_TRAVEL
-
-    self.AC_FAN_X_LARGE         = self.PAX_AC_FAN_X_LARGE
-    self.AC_FAN_Y_LARGE         = self.PAX_AC_FAN_Y_LARGE
-    self.AC_SLIDER_X_LARGE      = self.PAX_AC_SLIDER_X_LARGE
-    self.AC_SLIDER_Y_LARGE      = self.PAX_AC_SLIDER_Y_LARGE
-    self.AC_SLIDER_TRAVEL_LARGE = self.PAX_AC_SLIDER_TRAVEL_LARGE
-
-    -- Premium radio anchors (if you use premium radio UI)
-    self.RADIO_UI_X       = self.PAX_RADIO_UI_X
-    self.RADIO_UI_Y       = self.PAX_RADIO_UI_Y
-    self.RADIO_UI_X_LARGE = self.PAX_RADIO_UI_X_LARGE
-    self.RADIO_UI_Y_LARGE = self.PAX_RADIO_UI_Y_LARGE
-
-    -- Value radio anchors (used by value radio pick(reg, large))
-    self.RADIO_VALUE_UI_X       = self.PAX_RADIO_VALUE_UI_X
-    self.RADIO_VALUE_UI_Y       = self.PAX_RADIO_VALUE_UI_Y
-    self.RADIO_VALUE_UI_X_LARGE = self.PAX_RADIO_VALUE_UI_X_LARGE
-    self.RADIO_VALUE_UI_Y_LARGE = self.PAX_RADIO_VALUE_UI_Y_LARGE
-
-
-
-    -- If UI already built, refresh visuals/sizes
-    if self.backgroundTex then
-        self:_paxApplyBGTexture()
+    local function passengerTex(name)
+        return YourDash.GetDashboardTexture and
+            YourDash.GetDashboardTexture(family, "passenger", name) or nil
+    end
+    local function dashTex(name)
+        return YourDash.GetDashboardTexture and
+            YourDash.GetDashboardTexture(family, "dash", name) or nil
     end
 
-    if self.paxToggleBtn then
-        local ttex = self.__pax_btn_retract or self.__pax_btn_expand
-        if ttex then self:_setImageTextureAndSize(self.paxToggleBtn, ttex) end
-        self:_paxRefreshToggleTexture()
+    local expanded = passengerTex(expandedName)
+    local retracted = passengerTex(retractedName)
+    if family == "sport" and accent ~= "base" then
+        expanded = expanded or passengerTex("passenger_dash_base.png")
+        retracted = retracted or passengerTex("passenger_retracted_base.png")
+    end
+    self.__pax_bg_expanded = expanded or self.__pax_bg_expanded
+    self.__pax_bg_retracted = retracted or expanded or self.__pax_bg_retracted or self.__pax_bg_expanded
+
+    -- Deliberately bypass YourDash.GetTexture: only the retained 1x originals
+    -- exist, and the ISImage render scales them to the selected pack.
+    self.__pax_btn_retract = paxRawTexture(self.PAX_BTN_RETRACT)
+    self.__pax_btn_expand = paxRawTexture(self.PAX_BTN_EXPAND) or self.__pax_btn_retract
+
+    if family == "heavy" then
+        self.__lock_off = dashTex("btn_off.png")
+        self.__lock_on = dashTex("btn_on.png") or self.__lock_off
+        self.__lock_partial = self.__lock_off
+        self.__window_switch = dashTex("window_switch.png")
+        self.__window_switch_push = dashTex("window_switch_down.png") or self.__window_switch
+        self.__window_switch_pull = dashTex("window_switch_up.png") or self.__window_switch
+    elseif family == "sport" then
+        self.__lock_off = dashTex("lock_off.png")
+        self.__lock_on = self.__lock_off
+        self.__lock_partial = self.__lock_off
+        self.__window_switch = dashTex("window_switch.png")
+        self.__window_switch_push = dashTex("window_switch_down.png") or self.__window_switch
+        self.__window_switch_pull = dashTex("window_switch_up.png") or self.__window_switch
+    else
+        self.__lock_off = dashTex("lock_off.png")
+        self.__lock_partial = dashTex("lock_partial.png") or self.__lock_off
+        self.__lock_on = dashTex("lock_on.png") or self.__lock_off
+        self.__window_switch = dashTex("window_switch.png")
+        self.__window_switch_push = dashTex("window_switch_push.png") or self.__window_switch
+        self.__window_switch_pull = dashTex("window_switch_pull.png") or self.__window_switch
     end
 
+    if family == "sport" then
+        self.__paxSportACOff = dashTex("ac_off.png")
+        self.__paxSportACOn = dashTex("ac_on.png") or self.__paxSportACOff
+        self.__paxSportFanButtonTex = dashTex("fan_btn.png")
+        self.__paxSportACDisplayButtonTex = dashTex("disp_btn_ac.png")
+        self.__paxSportTempKnobTex = dashTex("temp_slider.png")
+        self.__paxSportClockTex = dashTex("clock.png")
+        self.__paxSportClockMinuteTex = dashTex("clock_needle_long.png")
+        self.__paxSportClockHourTex = dashTex("clock_needle_short.png")
+        self.__paxSportLEDOff = dashTex("led_off.png")
+        self.__paxSportLEDOn = dashTex("led_on.png") or self.__paxSportLEDOff
+        self.__paxSportLEDPartial = dashTex("led_partial.png") or self.__paxSportLEDOff
+    end
+
+    local layout = self:_paxGetLayout1x()
+    local radioPremium = layout.radioPremium or {}
+    local radioStandard = layout.radioStandard or {}
+    -- Radio modules scale these 1x anchors themselves.
+    self.RADIO_UI_X, self.RADIO_UI_Y = radioPremium.x or 0, radioPremium.y or 0
+    self.RADIO_VALUE_UI_X, self.RADIO_VALUE_UI_Y = radioStandard.x or 0, radioStandard.y or 0
+
+    if self.backgroundTex then self:_paxApplyBGTexture() end
+    if self.paxToggleBtn then self:_paxRefreshToggleTexture() end
     if self.doorTex and self.__lock_off then
         self:_setImageTextureAndSize(self.doorTex, self.__lock_off)
+        -- Heavy lock artwork already contains its released/pressed depth.
+        self.doorTex.__pressedScale = family == "heavy" and 1.0 or 0.96
+    end
+    if self.windowTex and self.__window_switch then self:_setImageTextureAndSize(self.windowTex, self.__window_switch) end
+
+    -- These helpers retarget existing controls by family/scale; they do not
+    -- recreate controls whose ISImage instances already exist.  Never invoke
+    -- them from new(), before the panel and its children are instantiated.
+    if self.__paxChildrenCreated then
+        if self._ensureACControls then pcall(function() self:_ensureACControls() end) end
+        if self._ensureRadioControls then pcall(function() self:_ensureRadioControls() end) end
+        if self._ensureValueRadioControls then pcall(function() self:_ensureValueRadioControls() end) end
+        if self._paxEnsureSportExtras then self:_paxEnsureSportExtras() end
     end
 
-    if self.windowTex and self.__window_switch then
-        self:_setImageTextureAndSize(self.windowTex, self.__window_switch)
-    end
-
-    if (not isInit) and self.onResolutionChange then
-        self:onResolutionChange()
-    end
+    if (not isInit) and self.onResolutionChange then self:onResolutionChange() end
 end
 
 -- =========================================================
@@ -375,49 +449,9 @@ function YourDashPassengerDashboard:new(playerNum, chr)
     o.__paxChildrenCreated = false
     o.__paxLastBarH = nil
 
-    -- Apply selected pack (Regular vs Large)
-    local wantLarge = YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures() or false
-
-    if o._paxApplyTexturePack then
-        -- Preferred path (your new pack-aware loader + large offsets)
-        o:_paxApplyTexturePack(wantLarge, true)
-    else
-        -- Safe fallback (regular only, won't crash)
-        local function tex(path, fallback)
-            if YourDash and YourDash.GetTexture then
-                return YourDash.GetTexture(path, fallback)
-            end
-            local t = getTexture(path)
-            if (not t) and fallback then t = getTexture(fallback) end
-            return t
-        end
-
-        o.__pax_bg_expanded  = tex(self.PAX_BG_EXPANDED)
-        o.__pax_bg_retracted = tex(self.PAX_BG_RETRACTED) or o.__pax_bg_expanded
-
-        o.__pax_btn_retract  = tex(self.PAX_BTN_RETRACT)
-        o.__pax_btn_expand   = tex(self.PAX_BTN_EXPAND) or o.__pax_btn_retract
-
-        o.__lock_off     = tex("media/ui/vehicles/lock_off.png")
-        o.__lock_partial = tex("media/ui/vehicles/lock_partial.png") or o.__lock_off
-        o.__lock_on      = tex("media/ui/vehicles/lock_on.png")      or o.__lock_off
-
-        o.__window_switch      = tex("media/ui/vehicles/window_switch.png")
-        o.__window_switch_push = tex("media/ui/vehicles/window_switch_push.png") or o.__window_switch
-        o.__window_switch_pull = tex("media/ui/vehicles/window_switch_pull.png") or o.__window_switch
-
-        -- Instance overrides (regular defaults)
-        o.AC_FAN_X         = self.PAX_AC_FAN_X
-        o.AC_FAN_Y         = self.PAX_AC_FAN_Y
-        o.AC_SLIDER_X      = self.PAX_AC_SLIDER_X
-        o.AC_SLIDER_Y      = self.PAX_AC_SLIDER_Y
-        o.AC_SLIDER_TRAVEL = self.PAX_AC_SLIDER_TRAVEL
-
-        o.RADIO_UI_X       = self.PAX_RADIO_UI_X
-        o.RADIO_UI_Y       = self.PAX_RADIO_UI_Y
-        o.RADIO_VALUE_UI_X = self.PAX_RADIO_VALUE_UI_X
-        o.RADIO_VALUE_UI_Y = self.PAX_RADIO_VALUE_UI_Y
-    end
+    o.__YourDashFamily = "standard"
+    o.__YourDashAccent = "base"
+    o:_paxApplyTexturePack(nil, true)
 
     return o
 end
@@ -451,10 +485,417 @@ function YourDashPassengerDashboard:_paxGetBarHeight()
 	end
 
 	if (not h) or h <= 0 then
-		h = self.PAX_BAR_FALLBACK_H or 0
+		local layout = self:_paxGetLayout1x()
+		h = paxScaled(layout.barFallback or 70, self.__YourDashScale or paxScale())
 	end
 
 	return h
+end
+
+-- The shared AC module reads driver-cluster layout data.  Passenger art has
+-- different slots, so keep all proven AC commands/dragging behavior and only
+-- override its positioning hook for this derived panel.
+function YourDashPassengerDashboard:_YourDashEnsureACBackground(_texture)
+    -- The standard and heavy passenger PNGs already contain their AC face.
+    -- Avoid adding a duplicate opaque child above the fan/slider controls.
+    if self.__YourDashACBackground then self.__YourDashACBackground:setVisible(false) end
+end
+
+function YourDashPassengerDashboard:_positionACControls()
+    if not self.backgroundTex then return end
+    if self._ensureACControls then pcall(function() self:_ensureACControls() end) end
+    if (self.__YourDashFamily or "standard") == "sport" then return end
+
+    local layout = self:_paxGetLayout1x()
+    local ac = layout.ac or {}
+    local scale = self.__YourDashScale or paxScale()
+    local baseX = self.backgroundTex:getX()
+    local baseY = self.backgroundTex:getY()
+
+    if self.__YourDashACBackground then
+        local background = ac.background
+        if background then
+            self.__YourDashACBackground:setX(baseX + paxScaled(background.x, scale))
+            self.__YourDashACBackground:setY(baseY + paxScaled(background.y, scale))
+        end
+    end
+
+    local slider = ac.slider
+    if self.acTempSlider and slider then
+        self.__acMinX = baseX + paxScaled(slider.x, scale)
+        self.__acMaxX = self.__acMinX + paxScaled(slider.travel or 0, scale)
+        self.__acY = baseY + paxScaled(slider.y, scale)
+        if self._updateACTempSliderPos then self:_updateACTempSliderPos() end
+    end
+
+    local fan = ac.fan
+    if self.heaterTex and fan then
+        self.heaterTex:setX(baseX + paxScaled(fan.x, scale))
+        self.heaterTex:setY(baseY + paxScaled(fan.y, scale))
+    end
+end
+
+-- =========================================================
+-- Sport passenger climate row, lock LED, and analog clock
+-- =========================================================
+local function paxMakeImage(parent, texture, opaque)
+    if not texture then return nil end
+    local image = ISImage:new(0, 0, texture:getWidthOrig(), texture:getHeightOrig(), texture)
+    image:initialise()
+    image:instantiate()
+    image.backgroundColor = opaque and { r=1, g=1, b=1, a=1 } or { r=0, g=0, b=0, a=0 }
+    parent:addChild(image)
+    return image
+end
+
+function YourDashPassengerDashboard:_paxSetSportImage(image, texture, opaque)
+    if not image or not texture then return end
+    self:_setImageTextureAndSize(image, texture)
+    if opaque then image.backgroundColor = { r=1, g=1, b=1, a=1 } end
+end
+
+function YourDashPassengerDashboard:onPaxSportFan()
+    if ISVehicleDashboard.onYourDashSportFan then
+        return ISVehicleDashboard.onYourDashSportFan(self)
+    end
+    -- Guarded fallback still uses the shared AC module's vanilla MP command.
+    if self.onClickACFan then return self:onClickACFan() end
+end
+
+function YourDashPassengerDashboard:onPaxSportACDisplay()
+    if ISVehicleDashboard.onYourDashSportACDisplay then
+        return ISVehicleDashboard.onYourDashSportACDisplay(self)
+    end
+    self.__YourDashSportACMode = ((self.__YourDashSportACMode or 1) % 3) + 1
+end
+
+local function paxDrawFittedCentre(layer, text, rect, scale, maximumZoom)
+    if not layer or not text or not rect then return end
+    local font = YourDash.GetUIFont and YourDash.GetUIFont() or (UIFont and UIFont.Small)
+    if not font then return end
+
+    local x = paxScaled(rect.x, scale)
+    local y = paxScaled(rect.y, scale)
+    local width = paxScaled(rect.width, scale)
+    local height = paxScaled(rect.height, scale)
+    local opticalOffsetX = paxScaled(rect.textOffsetX or 0, scale)
+    local fontHeight = YourDash.FontHeightForScale and YourDash.FontHeightForScale() or nil
+    local textWidth = nil
+    if getTextManager then
+        local ok, manager = pcall(getTextManager)
+        if ok and manager then
+            fontHeight = fontHeight or paxSafeCall(manager, "getFontHeight", font)
+            textWidth = paxSafeCall(manager, "MeasureStringX", font, text)
+        end
+    end
+    fontHeight = tonumber(fontHeight) or height
+    textWidth = tonumber(textWidth)
+
+    if textWidth and textWidth > 0 and layer.drawTextZoomed then
+        local zoom = math.min(maximumZoom or 1,
+            math.max(1, width - 2) / textWidth,
+            math.max(1, height - 1) / fontHeight)
+        if zoom < 0.999 then
+            layer:drawTextZoomed(text,
+                x + (width - textWidth * zoom) / 2 + opticalOffsetX,
+                y + (height - fontHeight * zoom) / 2,
+                zoom, 0.10, 0.13, 0.04, 1, font)
+            return
+        end
+    end
+    layer:drawTextCentre(text, x + width / 2 + opticalOffsetX,
+        y + (height - fontHeight) / 2, 0.10, 0.13, 0.04, 1, font)
+end
+
+local function paxDrawTwoLineACDisplay(layer, label, value, rect, scale)
+    if not rect or not label or not value then return end
+    local font = YourDash.GetUIFont and YourDash.GetUIFont() or (UIFont and UIFont.Small)
+    local x = paxScaled(rect.x, scale)
+    local y = paxScaled(rect.y, scale)
+    local width = paxScaled(rect.width, scale)
+    local height = paxScaled(rect.height, scale)
+    local opticalOffsetX = paxScaled(rect.textOffsetX or 0, scale)
+    local fontHeight = YourDash.FontHeightForScale and YourDash.FontHeightForScale() or nil
+    local labelWidth, valueWidth = nil, nil
+    if getTextManager and font then
+        local ok, manager = pcall(getTextManager)
+        if ok and manager then
+            fontHeight = fontHeight or paxSafeCall(manager, "getFontHeight", font)
+            labelWidth = paxSafeCall(manager, "MeasureStringX", font, label)
+            valueWidth = paxSafeCall(manager, "MeasureStringX", font, value)
+        end
+    end
+    fontHeight = tonumber(fontHeight)
+    labelWidth, valueWidth = tonumber(labelWidth), tonumber(valueWidth)
+
+    -- Match the driver's conservative fallback when text measurements are not
+    -- available, while normal B42 clients use the larger packed rows below.
+    if not fontHeight or fontHeight <= 0 or not labelWidth or labelWidth <= 0 or
+            not valueWidth or valueWidth <= 0 then
+        local rawHeight = tonumber(rect.height) or 0
+        local labelHeight = math.max(1, math.floor(rawHeight * 0.35))
+        local valueHeight = math.max(1, rawHeight - labelHeight)
+        paxDrawFittedCentre(layer, label, {
+            x = rect.x, y = rect.y, width = rect.width, height = labelHeight,
+            textOffsetX = rect.textOffsetX,
+        }, scale, 0.72)
+        paxDrawFittedCentre(layer, value, {
+            x = rect.x, y = (rect.y or 0) + labelHeight,
+            width = rect.width, height = valueHeight,
+            textOffsetX = rect.textOffsetX,
+        }, scale, 1.0)
+        return
+    end
+
+    local availableWidth = math.max(1, width - 2)
+    local labelZoom = math.min(1.00, availableWidth / labelWidth)
+    local valueZoom = math.min(1.25, availableWidth / valueWidth)
+    local inkTop = fontHeight * 0.25
+    local inkHeight = fontHeight * 0.56
+    local gap = math.max(1, paxScaled(1, scale))
+    local totalInkHeight = inkHeight * (labelZoom + valueZoom)
+    local availableInkHeight = math.max(1, height - gap)
+    if totalInkHeight > availableInkHeight then
+        local fit = availableInkHeight / totalInkHeight
+        labelZoom, valueZoom = labelZoom * fit, valueZoom * fit
+        totalInkHeight = availableInkHeight
+    end
+
+    local packedHeight = totalInkHeight + gap
+    local packedTop = y + (height - packedHeight) / 2
+    local labelOriginY = packedTop - inkTop * labelZoom
+    local valueInkTop = packedTop + inkHeight * labelZoom + gap
+    local valueOriginY = valueInkTop - inkTop * valueZoom
+
+    local function drawLine(text, textWidth, zoom, originY)
+        if math.abs(zoom - 1) > 0.001 and layer.drawTextZoomed then
+            layer:drawTextZoomed(text,
+                x + (width - textWidth * zoom) / 2 + opticalOffsetX,
+                originY, zoom, 0.10, 0.13, 0.04, 1, font)
+            return
+        end
+        layer:drawTextCentre(text, x + width / 2 + opticalOffsetX, originY,
+            0.10, 0.13, 0.04, 1, font)
+    end
+
+    drawLine(label, labelWidth, labelZoom, labelOriginY)
+    drawLine(value, valueWidth, valueZoom, valueOriginY)
+end
+
+function YourDashPassengerDashboard:_paxDrawSportOverlay(layer)
+    if self.__paxRetracted or (self.__YourDashFamily or "standard") ~= "sport" then return end
+    local layout = self:_paxGetLayout1x()
+    local scale = self.__YourDashScale or paxScale()
+
+    local heater = self.vehicle and paxSafeCall(self.vehicle, "getHeater") or nil
+    local data = heater and paxSafeCall(heater, "getModData") or nil
+    if data and data.active == true and layout.ac and layout.ac.display then
+        local drewRows = false
+        if self._YourDashSportACRows then
+            local ok, label, value = pcall(self._YourDashSportACRows, self)
+            if ok and label and value then
+                paxDrawTwoLineACDisplay(layer, label, value, layout.ac.display, scale)
+                drewRows = true
+            end
+        end
+        -- Compatibility for an older ZZZ module or a partially-loaded UI.
+        if not drewRows and self._YourDashSportACText then
+            local ok, text = pcall(self._YourDashSportACText, self)
+            if ok and text then paxDrawFittedCentre(layer, text, layout.ac.display, scale) end
+        end
+    end
+
+    local clockPoint = layout.clock
+    local clockTexture = self.__paxSportClockTex
+    if clockPoint and clockTexture then
+        local x = paxScaled(clockPoint.x, scale)
+        local y = paxScaled(clockPoint.y, scale)
+        local width = clockTexture:getWidthOrig()
+        local height = clockTexture:getHeightOrig()
+        layer:drawTextureScaled(clockTexture, x, y, width, height, 1)
+
+        local gameTime = nil
+        if getGameTime then
+            local ok, value = pcall(getGameTime)
+            if ok then gameTime = value end
+        end
+        if not gameTime and GameTime and GameTime.getInstance then
+            local ok, value = pcall(GameTime.getInstance)
+            if ok then gameTime = value end
+        end
+        local hourValue = tonumber(gameTime and paxSafeCall(gameTime, "getHour"))
+        local minute = tonumber(gameTime and paxSafeCall(gameTime, "getMinutes"))
+        if hourValue == nil or minute == nil then
+            local timeOfDay = tonumber(gameTime and paxSafeCall(gameTime, "getTimeOfDay")) or 0
+            timeOfDay = timeOfDay % 24
+            hourValue = math.floor(timeOfDay)
+            minute = (timeOfDay % 1) * 60
+        end
+        local hour = (hourValue % 12) + minute / 60
+        local pivotX, pivotY = x + width / 2, y + height / 2
+        -- DrawTextureAngle's positive direction is clockwise in the dashboard UI.
+        if self.__paxSportClockHourTex then
+            layer:DrawTextureAngle(self.__paxSportClockHourTex, pivotX, pivotY, hour * 30)
+        end
+        if self.__paxSportClockMinuteTex then
+            layer:DrawTextureAngle(self.__paxSportClockMinuteTex, pivotX, pivotY, minute * 6)
+        end
+    end
+end
+
+function YourDashPassengerDashboard:_paxEnsureSportExtras()
+    if (self.__YourDashFamily or "standard") ~= "sport" then return end
+
+    if not self.__paxSportACBackground and self.__paxSportACOff then
+        self.__paxSportACBackground = paxMakeImage(self, self.__paxSportACOff, true)
+        paxSetMouseTransparent(self.__paxSportACBackground)
+    end
+    self:_paxSetSportImage(self.__paxSportACBackground, self.__paxSportACOff, true)
+
+    if not self.__paxSportFanButton and self.__paxSportFanButtonTex then
+        local button = paxMakeImage(self, self.__paxSportFanButtonTex, false)
+        button.target = self
+        button.onclick = YourDashPassengerDashboard.onPaxSportFan
+        self:_installPressedEffect(button, 0.96)
+        self.__paxSportFanButton = button
+    end
+    self:_paxSetSportImage(self.__paxSportFanButton, self.__paxSportFanButtonTex, false)
+
+    if not self.__paxSportACDisplayButton and self.__paxSportACDisplayButtonTex then
+        local button = paxMakeImage(self, self.__paxSportACDisplayButtonTex, false)
+        button.target = self
+        button.onclick = YourDashPassengerDashboard.onPaxSportACDisplay
+        button.mouseovertext = "Cycle climate display"
+        self:_installPressedEffect(button, 0.96)
+        self.__paxSportACDisplayButton = button
+    end
+    self:_paxSetSportImage(self.__paxSportACDisplayButton, self.__paxSportACDisplayButtonTex, false)
+
+    if not self.__paxSportTempKnob and self.__paxSportTempKnobTex and self._YourDashSportCreateKnob then
+        self.__paxSportTempKnob = self:_YourDashSportCreateKnob(self.__paxSportTempKnobTex)
+    elseif self.__paxSportTempKnob and self.__paxSportTempKnobTex then
+        self.__paxSportTempKnob.tex = self.__paxSportTempKnobTex
+        self.__paxSportTempKnob:setWidth(self.__paxSportTempKnobTex:getWidthOrig())
+        self.__paxSportTempKnob:setHeight(self.__paxSportTempKnobTex:getHeightOrig())
+    end
+
+    if not self.__paxSportDoorLED and self.__paxSportLEDOff then
+        self.__paxSportDoorLED = paxMakeImage(self, self.__paxSportLEDOff, true)
+        paxSetMouseTransparent(self.__paxSportDoorLED)
+    end
+    self:_paxSetSportImage(self.__paxSportDoorLED, self.__paxSportLEDOff, true)
+
+    if not self.__paxSportOverlay then
+        local overlay = ISPanel:new(0, 0, 1, 1)
+        overlay:initialise()
+        overlay:instantiate()
+        overlay.backgroundColor = { r=0, g=0, b=0, a=0 }
+        overlay.borderColor = { r=0, g=0, b=0, a=0 }
+        overlay.target = self
+        paxSetMouseTransparent(overlay)
+        function overlay:prerender() end
+        function overlay:render()
+            if self.target then self.target:_paxDrawSportOverlay(self) end
+        end
+        self:addChild(overlay)
+        self.__paxSportOverlay = overlay
+    end
+end
+
+function YourDashPassengerDashboard:_paxPositionSportExtras()
+    if not self.backgroundTex then return end
+    if (self.__YourDashFamily or "standard") ~= "sport" then
+        self:_paxHideSportExtras()
+        return
+    end
+    self:_paxEnsureSportExtras()
+    local layout = self:_paxGetLayout1x()
+    local scale = self.__YourDashScale or paxScale()
+    local ac = layout.ac or {}
+
+    local function position(element, point)
+        if not element or not point then return end
+        element:setX(paxScaled(point.x, scale))
+        element:setY(paxScaled(point.y, scale))
+    end
+    position(self.__paxSportACBackground, ac.background)
+    position(self.__paxSportFanButton, ac.fan)
+    position(self.__paxSportACDisplayButton, ac.displayButton)
+    position(self.__paxSportTempKnob, ac.knob)
+    position(self.__paxSportDoorLED, layout.doorLED)
+
+    if self.__paxSportOverlay then
+        self.__paxSportOverlay:setX(0)
+        self.__paxSportOverlay:setY(0)
+        self.__paxSportOverlay:setWidth(self.backgroundTex:getWidth())
+        self.__paxSportOverlay:setHeight(self.backgroundTex:getHeight())
+    end
+end
+
+function YourDashPassengerDashboard:_paxHideSportExtras()
+    if self.__paxSportACBackground then self.__paxSportACBackground:setVisible(false) end
+    if self.__paxSportFanButton then self.__paxSportFanButton:setVisible(false) end
+    if self.__paxSportACDisplayButton then self.__paxSportACDisplayButton:setVisible(false) end
+    if self.__paxSportTempKnob then self.__paxSportTempKnob:setVisible(false) end
+    if self.__paxSportDoorLED then self.__paxSportDoorLED:setVisible(false) end
+    if self.__paxSportOverlay then self.__paxSportOverlay:setVisible(false) end
+end
+
+function YourDashPassengerDashboard:_paxUpdateSportExtras(hasBatteryPower)
+    local show = not self.__paxRetracted and (self.__YourDashFamily or "standard") == "sport"
+    if not show then
+        self:_paxHideSportExtras()
+        return
+    end
+    self:_paxEnsureSportExtras()
+
+    local heater = self.vehicle and paxSafeCall(self.vehicle, "getHeater") or nil
+    local data = heater and paxSafeCall(heater, "getModData") or nil
+    local active = data and data.active == true
+    local rawTemperature = data and tonumber(data.temperature) or 0
+    local backgroundTexture = active and self.__paxSportACOn or self.__paxSportACOff
+    self:_paxSetSportImage(self.__paxSportACBackground, backgroundTexture, true)
+    if self.__paxSportACBackground then self.__paxSportACBackground:setVisible(true) end
+
+    local hasHeater = heater ~= nil
+    local powered = self.vehicle and
+        (paxSafeCall(self.vehicle, "isEngineRunning") == true or
+         paxSafeCall(self.vehicle, "isKeysInIgnition") == true)
+
+    if self.__paxSportFanButton then
+        self.__paxSportFanButton:setVisible(hasHeater)
+        self.__paxSportFanButton.__disabled = not powered
+        self.__paxSportFanButton.target = self
+        self.__paxSportFanButton.onclick = powered and YourDashPassengerDashboard.onPaxSportFan or nil
+    end
+    if self.__paxSportACDisplayButton then
+        self.__paxSportACDisplayButton:setVisible(hasHeater)
+        self.__paxSportACDisplayButton.__disabled = not hasHeater
+        self.__paxSportACDisplayButton.target = self
+        self.__paxSportACDisplayButton.onclick = hasHeater and YourDashPassengerDashboard.onPaxSportACDisplay or nil
+    end
+    if self.__paxSportTempKnob then
+        self.__paxSportTempKnob:setVisible(hasHeater)
+        self.__paxSportTempKnob.__disabled = not powered
+        if hasHeater and not self.__paxSportTempKnob.dragging and self.__paxSportTempKnob.setKnobPosition then
+            local index = paxNearestSportTempIndex(rawTemperature)
+            self.__paxSportTempKnob:setKnobPosition(PAX_SPORT_AC_RAW_LEVELS[index])
+        end
+    end
+
+    if self.__paxSportDoorLED then
+        local ledTexture = self.__paxSportLEDOff
+        if hasBatteryPower then
+            if self.vehicle:areAllDoorsLocked() then
+                ledTexture = self.__paxSportLEDOn
+            elseif self.vehicle:isAnyDoorLocked() then
+                ledTexture = self.__paxSportLEDPartial
+            end
+        end
+        self:_paxSetSportImage(self.__paxSportDoorLED, ledTexture, true)
+        self.__paxSportDoorLED:setVisible(true)
+    end
+    if self.__paxSportOverlay then self.__paxSportOverlay:setVisible(true) end
 end
 
 function YourDashPassengerDashboard:_paxApplyBGTexture()
@@ -475,9 +916,7 @@ function YourDashPassengerDashboard:_paxRefreshToggleTexture()
     if not self.paxToggleBtn then return end
 
     local tex = self.__paxRetracted and self.__pax_btn_expand or self.__pax_btn_retract
-    if tex and self.paxToggleBtn.texture ~= tex then
-        self:_setImageTextureAndSize(self.paxToggleBtn, tex)
-    end
+    if tex then self:_paxSetToggleTexture(tex) end
 
     -- Hover text
     self.paxToggleBtn.mouseovertext =
@@ -494,7 +933,9 @@ function YourDashPassengerDashboard:_paxHideAllExpandedControls()
 	-- AC
 	if self.heaterTex then self.heaterTex:setVisible(false) end
 	if self.acTempSlider then self.acTempSlider:setVisible(false) end
+	if self.__YourDashACBackground then self.__YourDashACBackground:setVisible(false) end
 	self.__acDragging = false
+	self:_paxHideSportExtras()
 
 	-- Radio (both UIs, router helpers if present)
 	if self._yourDashHidePremiumRadioUI then pcall(function() self:_yourDashHidePremiumRadioUI() end) end
@@ -572,7 +1013,7 @@ function YourDashPassengerDashboard:createChildren()
 		self:addChild(self.doorTex)
 
 		self:_setImageEnabled(self.doorTex, true, getText("Tooltip_Dashboard_LockedDoors"), ISVehicleDashboard.onClickDoors, self)
-		self:_installPressedEffect(self.doorTex, 0.96)
+		self:_installPressedEffect(self.doorTex, self.__YourDashFamily == "heavy" and 1.0 or 0.96)
 	end
 
 	-- Window button (reuse your window logic + textures)
@@ -587,7 +1028,8 @@ function YourDashPassengerDashboard:createChildren()
 
 		self:_installPressedEffect(self.windowTex, 1.0)
 
-		-- Press shows push/pull depending on current state (same as your driver dash)
+		-- Heavy/sport switches use their upper and lower halves as explicit
+		-- close/open commands.  Standard keeps the proven toggle behaviour.
 		local _down = self.windowTex.onMouseDown
 		function self.windowTex:onMouseDown(x, y)
 			if self.__disabled then return false end
@@ -595,7 +1037,15 @@ function YourDashPassengerDashboard:createChildren()
 
 			local dash = self.target
 			local wp = dash and dash:_getSeatWindowPart() or nil
-			if wp then
+			local family = dash and (dash.__YourDashFamily or "standard") or "standard"
+			local directional = family == "heavy" or family == "sport"
+			if dash then dash.__YourDashWindowCommand = nil end
+			if wp and directional then
+				local state = y < (self.height * 0.5) and "up" or "down"
+				dash.__YourDashWindowCommand = state
+				local stateTexture = state == "up" and dash.__window_switch_pull or dash.__window_switch_push
+				dash:_setImageTextureAndSize(self, stateTexture or dash.__window_switch)
+			elseif wp then
 				local w = wp:getWindow()
 				if w and w:isOpen() then
 					dash:_setImageTextureAndSize(self, dash.__window_switch_pull or dash.__window_switch)
@@ -617,9 +1067,14 @@ function YourDashPassengerDashboard:createChildren()
 			if dash and dash.__window_switch then
 				dash:_setImageTextureAndSize(self, dash.__window_switch)
 			end
-			if self.__disabled then return false end
-			if _up then return _up(self, x, y) end
-			return true
+			if self.__disabled then
+				if dash then dash.__YourDashWindowCommand = nil end
+				return false
+			end
+			local result = true
+			if _up then result = _up(self, x, y) end
+			if dash then dash.__YourDashWindowCommand = nil end
+			return result
 		end
 
 		local _upOut = self.windowTex.onMouseUpOutside
@@ -629,6 +1084,7 @@ function YourDashPassengerDashboard:createChildren()
 			if dash and dash.__window_switch then
 				dash:_setImageTextureAndSize(self, dash.__window_switch)
 			end
+			if dash then dash.__YourDashWindowCommand = nil end
 			if _upOut then return _upOut(self, x, y) end
 			return true
 		end
@@ -647,6 +1103,7 @@ function YourDashPassengerDashboard:createChildren()
 	-- Let your radio scripts build both UIs (router will choose at runtime)
 	if self._ensureRadioControls then pcall(function() self:_ensureRadioControls() end) end
 	if self._ensureValueRadioControls then pcall(function() self:_ensureValueRadioControls() end) end
+	self:_paxEnsureSportExtras()
 
 	self:_paxApplyBGTexture()
 	self:_paxRefreshToggleTexture()
@@ -662,13 +1119,21 @@ end
 -- Set vehicle (show/hide + UI manager)
 -- =========================================================
 function YourDashPassengerDashboard:setVehicle(vehicle)
+	local previousVehicle = self.vehicle
 	self.vehicle = vehicle
+	if previousVehicle ~= vehicle and self._yourDashResetRadioTransientState then
+		self:_yourDashResetRadioTransientState()
+	end
+	if previousVehicle ~= vehicle then self.__YourDashSportACMode = 1 end
 
 	if not vehicle then
 		self:setVisible(false)
 		if self.removeFromUIManager then self:removeFromUIManager() end
 		return
 	end
+
+	local profile = YourDash.GetVehicleProfile and YourDash.GetVehicleProfile(vehicle, true) or nil
+	self:_paxApplyTexturePack(profile, false)
 
 	self:setVisible(true)
 	if self.addToUIManager then self:addToUIManager() end
@@ -681,14 +1146,11 @@ end
 function YourDashPassengerDashboard:onResolutionChange()
 	if not self.backgroundTex then return end
 
-    local useLarge = YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures() or false
-    local function pick(a, b) return useLarge and b or a end
-
-    local OFFX = pick(self.PAX_OFFSET_X, self.PAX_OFFSET_X_LARGE)
-    local OFFY = pick(self.PAX_OFFSET_Y, self.PAX_OFFSET_Y_LARGE)
-
-    local PAD  = pick(self.PAX_BAR_PAD, self.PAX_BAR_PAD_LARGE)
-
+    local layout = self:_paxGetLayout1x()
+    local scale = self.__YourDashScale or paxScale()
+    local OFFX = paxScaled(self.PAX_OFFSET_X or 0, scale)
+    local OFFY = paxScaled(self.PAX_OFFSET_Y or 0, scale)
+    local PAD = paxScaled(layout.barPad or 10, scale)
 
 	local screenLeft   = getPlayerScreenLeft(self.playerNum)
 	local screenTop    = getPlayerScreenTop(self.playerNum)
@@ -704,16 +1166,12 @@ function YourDashPassengerDashboard:onResolutionChange()
     local x = screenLeft + (screenWidth - self.width) / 2 + (OFFX or 0)
     local y = screenTop + screenHeight - self.height - barH - pad + (OFFY or 0)
 
-    local TX = pick(self.PAX_TOGGLE_X, self.PAX_TOGGLE_X_LARGE)
-    local TY = pick(self.PAX_TOGGLE_Y, self.PAX_TOGGLE_Y_LARGE)
-
-    local DX = pick(self.PAX_DOOR_X, self.PAX_DOOR_X_LARGE)
-    local DY = pick(self.PAX_DOOR_Y, self.PAX_DOOR_Y_LARGE)
-
-    local WX = pick(self.PAX_WINDOW_X, self.PAX_WINDOW_X_LARGE)
-    local WY = pick(self.PAX_WINDOW_Y, self.PAX_WINDOW_Y_LARGE)
-
-
+    local toggle = layout.toggle or {}
+    local door = layout.door or {}
+    local window = layout.window or {}
+    local TX, TY = paxScaled(toggle.x, scale), paxScaled(toggle.y, scale)
+    local DX, DY = paxScaled(door.x, scale), paxScaled(door.y, scale)
+    local WX, WY = paxScaled(window.x, scale), paxScaled(window.y, scale)
 
 	self:setX(x)
 	self:setY(y)
@@ -741,8 +1199,9 @@ function YourDashPassengerDashboard:onResolutionChange()
         self.windowTex:setY(by)
     end
 
-	-- AC positions (uses instance overrides AC_* we set in new())
+	-- Passenger-family AC positions.
 	if self._positionACControls then pcall(function() self:_positionACControls() end) end
+	self:_paxPositionSportExtras()
 
 	-- Radio positions (both; router chooses which is visible)
 	if self._positionRadioControls then pcall(function() self:_positionRadioControls() end) end
@@ -755,11 +1214,13 @@ end
 function YourDashPassengerDashboard:prerender()
 	if not self.vehicle or not ISUIHandler.allUIVisible then return end
 
-	-- Hot-swap passenger texture pack if option changed
-    local wantLarge = YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures() or false
-    if self.__YourDashLarge ~= wantLarge then
-        self:_paxApplyTexturePack(wantLarge, false)
-    end
+	-- Family/accent and all four texture packs hot-swap in place.
+	local profile = YourDash.GetVehicleProfile and YourDash.GetVehicleProfile(self.vehicle) or nil
+	local family = profile and profile.family or "standard"
+	local accent = profile and profile.accent or "base"
+	if family ~= "sport" then accent = "base" end
+	local wantedPack = family .. ":" .. accent .. ":" .. paxScaleKey()
+	if self.__paxPackKey ~= wantedPack then self:_paxApplyTexturePack(profile, false) end
 
 
 	-- Auto-hide if seat changed (extra safety for instant seat swaps)
@@ -796,16 +1257,18 @@ function YourDashPassengerDashboard:prerender()
 
 	-- Door icon texture (reuse your driver logic: freeze to off when no power)
 	if self.doorTex and self.__lock_off then
+		local doorTexture = self.__lock_off
 		if hasPower then
 			if self.vehicle:areAllDoorsLocked() then
-				self.doorTex.texture = self.__lock_on
+				doorTexture = self.__lock_on
 			elseif self.vehicle:isAnyDoorLocked() then
-				self.doorTex.texture = self.__lock_partial
-			else
-				self.doorTex.texture = self.__lock_off
+				doorTexture = self.__lock_partial
 			end
-		else
-			self.doorTex.texture = self.__lock_off
+		end
+		if doorTexture and self.doorTex.texture ~= doorTexture then
+			-- Heavy ON/OFF exports differ by one pixel in height; retain the
+			-- authored state geometry instead of stretching either texture.
+			self:_setImageTextureAndSize(self.doorTex, doorTexture)
 		end
 		self.doorTex.backgroundColor = { r=0, g=0, b=0, a=0 }
 		self.doorTex:setVisible(true)
@@ -843,6 +1306,7 @@ function YourDashPassengerDashboard:prerender()
 
 	-- AC update (your AC patch handles heater existence + key/engine gating)
 	if self._updateACControls then pcall(function() self:_updateACControls() end) end
+	self:_paxUpdateSportExtras(hasPower)
 
 	-- Radio update via router (premium/value/none)
 	if self._yourDashUpdateRoutedRadio then

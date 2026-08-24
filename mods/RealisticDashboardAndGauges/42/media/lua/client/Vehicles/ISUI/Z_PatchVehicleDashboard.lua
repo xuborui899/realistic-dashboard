@@ -5,14 +5,30 @@ if isServer() then return end
 require "Vehicles/ISUI/ISVehicleDashboard"
 require "Vehicles/ISUI/ISVehiclePartMenu"
 require "ISUI/ISPanel"
+require "YourDash/DashboardCore"
 
 
 -- Guard: don’t patch twice
 if ISVehicleDashboard.__YourDashPatched then return end
 ISVehicleDashboard.__YourDashPatched = true
 
+-- B42 UI elements consume mouse input by default, even when they have no
+-- onclick handler.  All full-canvas and decorative layers must explicitly use
+-- the Lua wrapper below or they sit above and block the real dashboard buttons.
+local function YourDash_SetMouseTransparent(element)
+    if not element then return end
+    element.wantMouseEvents = false
+    if element.setWantMouseEvents then
+        element:setWantMouseEvents(false)
+    elseif element.javaObject and element.javaObject.setConsumeMouseEvents then
+        element.javaObject:setConsumeMouseEvents(false)
+    end
+end
+
+local HEAVY_LIGHT_ALIGN_X = { ["0.75x"] = 1, ["1x"] = 2, ["1.4x"] = 3, ["2x"] = 4 }
+
 -- =========================
--- YourDash: Texture pack option (Regular vs Large 2x)
+-- YourDash: texture-size and damage-overlay options
 -- =========================
 YourDash = YourDash or {}
 
@@ -20,10 +36,8 @@ YourDash = YourDash or {}
 YourDash.MODOPT_ID   = YourDash.MODOPT_ID   or "RealisticDash"
 YourDash.MODOPT_NAME = YourDash.MODOPT_NAME or "Realistic Dashboard & Gauges"
 
--- Native B42 ModOptions option id (ComboBox)
-YourDash.OPT_TEXSIZE_ID = "TextureSize" -- 1=Regular, 2=Large (2x)
-
-YourDash._useLargeTextures = YourDash._useLargeTextures or false
+-- Native B42 ModOptions option id (ComboBox); DashboardCore owns four entries.
+YourDash.OPT_TEXSIZE_ID = "TextureSize"
 
 -- Damage overlay intensity (cracks + stain)
 -- 1=Full(90%), 2=Medium(65%), 3=Low(40%), 4=Off(0%)
@@ -52,47 +66,7 @@ end
 
 
 function YourDash.UseLargeTextures()
-    return YourDash._useLargeTextures == true
-end
-
-function YourDash._toLargePath(path)
-    if not path then return nil end
-
-    -- already large
-    if string.find(path, "/vehicles/large/", 1, true) then
-        return path
-    end
-
-    -- preferred: mirror folder structure under media/ui/vehicles/large/
-    local p = string.gsub(path, "media/ui/vehicles/", "media/ui/vehicles/large/", 1)
-    if p ~= path then
-        return p
-    end
-
-    -- fallback for any non-vehicles path (rare)
-    return (string.gsub(path, "(.*/)([^/]+)$", "%1large/%2"))
-end
-
-
--- Texture getter with Large->Regular fallback
-function YourDash.GetTexture(path, fallbackPath)
-    if not path then return nil end
-
-    if YourDash.UseLargeTextures() then
-        local lp = YourDash._toLargePath(path)
-        local t = lp and getTexture(lp) or nil
-        if t then return t end
-
-        if fallbackPath then
-            local lpf = YourDash._toLargePath(fallbackPath)
-            t = lpf and getTexture(lpf) or nil
-            if t then return t end
-        end
-    end
-
-    local t = getTexture(path)
-    if (not t) and fallbackPath then t = getTexture(fallbackPath) end
-    return t
+    return YourDash.GetScaleKey and YourDash.GetScaleKey() == "2x"
 end
 
 local function YourDash_RefreshAllDashboards()
@@ -106,13 +80,12 @@ end
 
 function YourDash.SetUseLargeTextures(v)
     v = (v == true)
-    if YourDash._useLargeTextures == v then return end
-    YourDash._useLargeTextures = v
+    if YourDash.SetTextureSizeIndex then YourDash.SetTextureSizeIndex(v and 4 or 2) end
     YourDash_RefreshAllDashboards()
 end
 
 local function YourDash_ReadSavedOption()
-    local wantLarge = false
+    local sizeIndex = YourDash.DEFAULT_TEXTURE_SIZE_INDEX or 2
     local wearLevel = 1
 
     -- Build 42 native ModOptions
@@ -120,8 +93,7 @@ local function YourDash_ReadSavedOption()
         local sec = PZAPI.ModOptions:getOptions(YourDash.MODOPT_ID)
         if sec then
             local optSize = sec:getOption(YourDash.OPT_TEXSIZE_ID)
-            local idxSize = optSize and optSize:getValue() or 1
-            wantLarge = (idxSize == 2)
+            sizeIndex = optSize and optSize:getValue() or sizeIndex
 
             local optWear = sec:getOption(YourDash.OPT_WEARFX_ID)
             local idxWear = optWear and optWear:getValue() or 1
@@ -130,11 +102,11 @@ local function YourDash_ReadSavedOption()
 
     -- Optional fallback: Build 41 "ModOptions" mod
     elseif YourDash.OPTIONS_B41 then
-        wantLarge = (YourDash.OPTIONS_B41.UseLargeTextures == true)
+        sizeIndex = (YourDash.OPTIONS_B41.UseLargeTextures == true) and 4 or 2
         wearLevel = tonumber(YourDash.OPTIONS_B41.WearFxLevel) or 1
     end
 
-    YourDash.SetUseLargeTextures(wantLarge)
+    if YourDash.SetTextureSizeIndex then YourDash.SetTextureSizeIndex(sizeIndex) end
     YourDash.SetWearFxLevel(wearLevel)
 end
 
@@ -142,6 +114,7 @@ end
 local function YourDash_RegisterModOptions()
     -- Ensure native ModOptions is loaded (B42)
     pcall(require, "PZAPI/ModOptions")
+    if YourDash.RegisterTextureSizeOption then YourDash.RegisterTextureSizeOption() end
 
     if PZAPI and PZAPI.ModOptions then
         local sec = PZAPI.ModOptions:getOptions(YourDash.MODOPT_ID)
@@ -152,16 +125,10 @@ local function YourDash_RegisterModOptions()
         if sec and (not sec.__YourDash_Added) then
             sec.__YourDash_Added = true
 
-            sec:addTitle("UI Size")
-            sec:addDescription("Choose which dashboard texture pack to use.\n\nRegular: default textures. Recommended for resolution of 1440P and lower. \nLarge: 2x textures. Recommended for resolution of 2160p (4k) or higher.")
-            local combo = sec:addComboBox(YourDash.OPT_TEXSIZE_ID, "Dashboard texture size", nil)
-            combo:addItem("Regular", true)
-            combo:addItem("Large (2x)", false)
-
             sec:addTitle("Damage overlays")
             sec:addDescription("Choose effect opacity for dynamic cracks and stains.")
             local wear = sec:addComboBox(YourDash.OPT_WEARFX_ID, "Cracks & stains intensity", nil)
-            
+
             wear:addItem("Full (default)", true)
             wear:addItem("Medium", false)
             wear:addItem("Low", false)
@@ -169,10 +136,12 @@ local function YourDash_RegisterModOptions()
         end
 
         if sec then
-            sec.apply = function(self)
+            local previousApply = sec.apply
+            sec.apply = function(self, ...)
+                if previousApply then previousApply(self, ...) end
                 local optSize = self:getOption(YourDash.OPT_TEXSIZE_ID)
-                local idxSize = optSize and optSize:getValue() or 1
-                YourDash.SetUseLargeTextures(idxSize == 2)
+                local idxSize = optSize and optSize:getValue() or (YourDash.DEFAULT_TEXTURE_SIZE_INDEX or 2)
+                if YourDash.SetTextureSizeIndex then YourDash.SetTextureSizeIndex(idxSize) end
 
                 local optWear = self:getOption(YourDash.OPT_WEARFX_ID)
                 local idxWear = optWear and optWear:getValue() or 1
@@ -191,136 +160,32 @@ end
 Events.OnGameBoot.Add(YourDash_RegisterModOptions)
 Events.OnGameStart.Add(YourDash_ReadSavedOption)
 
--- =========================
--- Warning light offsets (relative to backgroundTex)
--- =========================
-ISVehicleDashboard.WARN_CRUISE_X = ISVehicleDashboard.WARN_CRUISE_X or 411
-ISVehicleDashboard.WARN_CRUISE_Y = ISVehicleDashboard.WARN_CRUISE_Y or 128
+-- Standard-family 1x fallbacks.  DashboardCore owns the authoritative
+-- per-family coordinates and scales them for all four texture packs.
+ISVehicleDashboard.WARN_CRUISE_X,  ISVehicleDashboard.WARN_CRUISE_Y  = 388, 127
+ISVehicleDashboard.WARN_BATTERY_X, ISVehicleDashboard.WARN_BATTERY_Y = 296, 123
+ISVehicleDashboard.WARN_BRAKE_X,   ISVehicleDashboard.WARN_BRAKE_Y   = 295, 97
+ISVehicleDashboard.WARN_CHECK_X,   ISVehicleDashboard.WARN_CHECK_Y   = 201, 125
+ISVehicleDashboard.WARN_STOP_X,    ISVehicleDashboard.WARN_STOP_Y    = 231, 139
+ISVehicleDashboard.WARN_DOOR_X,    ISVehicleDashboard.WARN_DOOR_Y    = 324, 120
+ISVehicleDashboard.WARN_FUEL_X,    ISVehicleDashboard.WARN_FUEL_Y    = 325, 97
+ISVehicleDashboard.WARN_LIGHT_X,   ISVehicleDashboard.WARN_LIGHT_Y   = 257, 27
 
-ISVehicleDashboard.WARN_BATTERY_X = ISVehicleDashboard.WARN_BATTERY_X or 321
-ISVehicleDashboard.WARN_BATTERY_Y = ISVehicleDashboard.WARN_BATTERY_Y or 123
+ISVehicleDashboard.CTRL_SPEEDREG_X, ISVehicleDashboard.CTRL_SPEEDREG_Y = 388, 127
+ISVehicleDashboard.CTRL_GEAR_X,     ISVehicleDashboard.CTRL_GEAR_Y     = 170, 126
+ISVehicleDashboard.CTRL_ENGINE_X,   ISVehicleDashboard.CTRL_ENGINE_Y   = 208, 68
+ISVehicleDashboard.CTRL_BATTERY_X,  ISVehicleDashboard.CTRL_BATTERY_Y  = 234, 68
+ISVehicleDashboard.CTRL_LIGHTS_X,   ISVehicleDashboard.CTRL_LIGHTS_Y   = 66, 130
+ISVehicleDashboard.CTRL_IGNITION_X, ISVehicleDashboard.CTRL_IGNITION_Y = 540, 128
+ISVehicleDashboard.CTRL_FUEL_ARROW_X, ISVehicleDashboard.CTRL_FUEL_ARROW_Y = 331, 53
+ISVehicleDashboard.CTRL_DOOR_X,     ISVehicleDashboard.CTRL_DOOR_Y     = 36, 64
+ISVehicleDashboard.CTRL_TRUNK_X,    ISVehicleDashboard.CTRL_TRUNK_Y    = 79, 64
+ISVehicleDashboard.CTRL_WINDOW_X,   ISVehicleDashboard.CTRL_WINDOW_Y   = 15, 109
 
-ISVehicleDashboard.WARN_BRAKE_X = ISVehicleDashboard.WARN_BRAKE_X or 319
-ISVehicleDashboard.WARN_BRAKE_Y = ISVehicleDashboard.WARN_BRAKE_Y or 97
-
-ISVehicleDashboard.WARN_CHECK_X = ISVehicleDashboard.WARN_CHECK_X or 225
-ISVehicleDashboard.WARN_CHECK_Y = ISVehicleDashboard.WARN_CHECK_Y or 127
-
-ISVehicleDashboard.WARN_STOP_X = ISVehicleDashboard.WARN_STOP_X or 254
-ISVehicleDashboard.WARN_STOP_Y = ISVehicleDashboard.WARN_STOP_Y or 139
-
-ISVehicleDashboard.WARN_DOOR_X = ISVehicleDashboard.WARN_DOOR_X or 349
-ISVehicleDashboard.WARN_DOOR_Y = ISVehicleDashboard.WARN_DOOR_Y or 122
-
-ISVehicleDashboard.WARN_FUEL_X = ISVehicleDashboard.WARN_FUEL_X or 349
-ISVehicleDashboard.WARN_FUEL_Y = ISVehicleDashboard.WARN_FUEL_Y or 98
-
-ISVehicleDashboard.WARN_LIGHT_X = ISVehicleDashboard.WARN_LIGHT_X or 281
-ISVehicleDashboard.WARN_LIGHT_Y = ISVehicleDashboard.WARN_LIGHT_Y or 27
-
--- =========================
--- 2x ("large") offsets for 4K texture pack (RAW numbers, easy to tune later)
--- =========================
-
--- Warning lights (regular already defined above)
-ISVehicleDashboard.WARN_CRUISE_X_LARGE  = ISVehicleDashboard.WARN_CRUISE_X_LARGE  or 822
-ISVehicleDashboard.WARN_CRUISE_Y_LARGE  = ISVehicleDashboard.WARN_CRUISE_Y_LARGE  or 256
-
-ISVehicleDashboard.WARN_BATTERY_X_LARGE = ISVehicleDashboard.WARN_BATTERY_X_LARGE or 638
-ISVehicleDashboard.WARN_BATTERY_Y_LARGE = ISVehicleDashboard.WARN_BATTERY_Y_LARGE or 245
-
-ISVehicleDashboard.WARN_BRAKE_X_LARGE   = ISVehicleDashboard.WARN_BRAKE_X_LARGE   or 637
-ISVehicleDashboard.WARN_BRAKE_Y_LARGE   = ISVehicleDashboard.WARN_BRAKE_Y_LARGE   or 195
-
-ISVehicleDashboard.WARN_CHECK_X_LARGE   = ISVehicleDashboard.WARN_CHECK_X_LARGE   or 448
-ISVehicleDashboard.WARN_CHECK_Y_LARGE   = ISVehicleDashboard.WARN_CHECK_Y_LARGE   or 251
-
-ISVehicleDashboard.WARN_STOP_X_LARGE    = ISVehicleDashboard.WARN_STOP_X_LARGE    or 507
-ISVehicleDashboard.WARN_STOP_Y_LARGE    = ISVehicleDashboard.WARN_STOP_Y_LARGE    or 277
-
-ISVehicleDashboard.WARN_DOOR_X_LARGE    = ISVehicleDashboard.WARN_DOOR_X_LARGE    or 694
-ISVehicleDashboard.WARN_DOOR_Y_LARGE    = ISVehicleDashboard.WARN_DOOR_Y_LARGE    or 242
-
-ISVehicleDashboard.WARN_FUEL_X_LARGE    = ISVehicleDashboard.WARN_FUEL_X_LARGE    or 697
-ISVehicleDashboard.WARN_FUEL_Y_LARGE    = ISVehicleDashboard.WARN_FUEL_Y_LARGE    or 196
-
-ISVehicleDashboard.WARN_LIGHT_X_LARGE   = ISVehicleDashboard.WARN_LIGHT_X_LARGE   or 561
-ISVehicleDashboard.WARN_LIGHT_Y_LARGE   = ISVehicleDashboard.WARN_LIGHT_Y_LARGE   or 54
-
-
--- Controls/UI positions (relative to backgroundTex)
-ISVehicleDashboard.CTRL_SPEEDREG_X = ISVehicleDashboard.CTRL_SPEEDREG_X or 333
-ISVehicleDashboard.CTRL_SPEEDREG_Y = ISVehicleDashboard.CTRL_SPEEDREG_Y or 98
-ISVehicleDashboard.CTRL_SPEEDREG_X_LARGE = ISVehicleDashboard.CTRL_SPEEDREG_X_LARGE or 666
-ISVehicleDashboard.CTRL_SPEEDREG_Y_LARGE = ISVehicleDashboard.CTRL_SPEEDREG_Y_LARGE or 196
-
-ISVehicleDashboard.CTRL_GEAR_X = ISVehicleDashboard.CTRL_GEAR_X or 199
-ISVehicleDashboard.CTRL_GEAR_Y = ISVehicleDashboard.CTRL_GEAR_Y or 126
-ISVehicleDashboard.CTRL_GEAR_X_LARGE = ISVehicleDashboard.CTRL_GEAR_X_LARGE or 400
-ISVehicleDashboard.CTRL_GEAR_Y_LARGE = ISVehicleDashboard.CTRL_GEAR_Y_LARGE or 255
-
-ISVehicleDashboard.CTRL_ENGINE_X = ISVehicleDashboard.CTRL_ENGINE_X or 208
-ISVehicleDashboard.CTRL_ENGINE_Y = ISVehicleDashboard.CTRL_ENGINE_Y or 68
-ISVehicleDashboard.CTRL_ENGINE_X_LARGE = ISVehicleDashboard.CTRL_ENGINE_X_LARGE or 416
-ISVehicleDashboard.CTRL_ENGINE_Y_LARGE = ISVehicleDashboard.CTRL_ENGINE_Y_LARGE or 136
-
--- Battery was previously engine+26; make it explicit for easy tuning
-ISVehicleDashboard.CTRL_BATTERY_X = ISVehicleDashboard.CTRL_BATTERY_X or 234
-ISVehicleDashboard.CTRL_BATTERY_Y = ISVehicleDashboard.CTRL_BATTERY_Y or 68
-ISVehicleDashboard.CTRL_BATTERY_X_LARGE = ISVehicleDashboard.CTRL_BATTERY_X_LARGE or 468
-ISVehicleDashboard.CTRL_BATTERY_Y_LARGE = ISVehicleDashboard.CTRL_BATTERY_Y_LARGE or 136
-
-ISVehicleDashboard.CTRL_LIGHTS_X = ISVehicleDashboard.CTRL_LIGHTS_X or 93
-ISVehicleDashboard.CTRL_LIGHTS_Y = ISVehicleDashboard.CTRL_LIGHTS_Y or 120
-ISVehicleDashboard.CTRL_LIGHTS_X_LARGE = ISVehicleDashboard.CTRL_LIGHTS_X_LARGE or 187
-ISVehicleDashboard.CTRL_LIGHTS_Y_LARGE = ISVehicleDashboard.CTRL_LIGHTS_Y_LARGE or 240
-
-ISVehicleDashboard.CTRL_IGNITION_X = ISVehicleDashboard.CTRL_IGNITION_X or 564
-ISVehicleDashboard.CTRL_IGNITION_Y = ISVehicleDashboard.CTRL_IGNITION_Y or 128
-ISVehicleDashboard.CTRL_IGNITION_X_LARGE = ISVehicleDashboard.CTRL_IGNITION_X_LARGE or 1128
-ISVehicleDashboard.CTRL_IGNITION_Y_LARGE = ISVehicleDashboard.CTRL_IGNITION_Y_LARGE or 280
-
-ISVehicleDashboard.CTRL_FUEL_ARROW_X = ISVehicleDashboard.CTRL_FUEL_ARROW_X or 356
-ISVehicleDashboard.CTRL_FUEL_ARROW_Y = ISVehicleDashboard.CTRL_FUEL_ARROW_Y or 54
-ISVehicleDashboard.CTRL_FUEL_ARROW_X_LARGE = ISVehicleDashboard.CTRL_FUEL_ARROW_X_LARGE or 712
-ISVehicleDashboard.CTRL_FUEL_ARROW_Y_LARGE = ISVehicleDashboard.CTRL_FUEL_ARROW_Y_LARGE or 108
-
-ISVehicleDashboard.CTRL_DOOR_X = ISVehicleDashboard.CTRL_DOOR_X or 51
-ISVehicleDashboard.CTRL_DOOR_Y = ISVehicleDashboard.CTRL_DOOR_Y or 64
-ISVehicleDashboard.CTRL_DOOR_X_LARGE = ISVehicleDashboard.CTRL_DOOR_X_LARGE or 103
-ISVehicleDashboard.CTRL_DOOR_Y_LARGE = ISVehicleDashboard.CTRL_DOOR_Y_LARGE or 129
-
-ISVehicleDashboard.CTRL_TRUNK_X = ISVehicleDashboard.CTRL_TRUNK_X or 98
-ISVehicleDashboard.CTRL_TRUNK_Y = ISVehicleDashboard.CTRL_TRUNK_Y or 64
-ISVehicleDashboard.CTRL_TRUNK_X_LARGE = ISVehicleDashboard.CTRL_TRUNK_X_LARGE or 197
-ISVehicleDashboard.CTRL_TRUNK_Y_LARGE = ISVehicleDashboard.CTRL_TRUNK_Y_LARGE or 129
-
-ISVehicleDashboard.CTRL_WINDOW_X = ISVehicleDashboard.CTRL_WINDOW_X or 32
-ISVehicleDashboard.CTRL_WINDOW_Y = ISVehicleDashboard.CTRL_WINDOW_Y or 112
-ISVehicleDashboard.CTRL_WINDOW_X_LARGE = ISVehicleDashboard.CTRL_WINDOW_X_LARGE or 64
-ISVehicleDashboard.CTRL_WINDOW_Y_LARGE = ISVehicleDashboard.CTRL_WINDOW_Y_LARGE or 224
-
-
--- Gauge needle pivot offsets (relative to dashOffset)
-ISVehicleDashboard.GAUGE_DASH_X = ISVehicleDashboard.GAUGE_DASH_X or 0
-ISVehicleDashboard.GAUGE_DASH_Y = ISVehicleDashboard.GAUGE_DASH_Y or 0
-ISVehicleDashboard.GAUGE_DASH_X_LARGE = ISVehicleDashboard.GAUGE_DASH_X_LARGE or 0
-ISVehicleDashboard.GAUGE_DASH_Y_LARGE = ISVehicleDashboard.GAUGE_DASH_Y_LARGE or 0
-
-ISVehicleDashboard.GAUGE_RPM_X = ISVehicleDashboard.GAUGE_RPM_X or 235
-ISVehicleDashboard.GAUGE_RPM_Y = ISVehicleDashboard.GAUGE_RPM_Y or 111
-ISVehicleDashboard.GAUGE_RPM_X_LARGE = ISVehicleDashboard.GAUGE_RPM_X_LARGE or 470
-ISVehicleDashboard.GAUGE_RPM_Y_LARGE = ISVehicleDashboard.GAUGE_RPM_Y_LARGE or 222
-
-ISVehicleDashboard.GAUGE_SPEED_X = ISVehicleDashboard.GAUGE_SPEED_X or 452
-ISVehicleDashboard.GAUGE_SPEED_Y = ISVehicleDashboard.GAUGE_SPEED_Y or 111
-ISVehicleDashboard.GAUGE_SPEED_X_LARGE = ISVehicleDashboard.GAUGE_SPEED_X_LARGE or 904
-ISVehicleDashboard.GAUGE_SPEED_Y_LARGE = ISVehicleDashboard.GAUGE_SPEED_Y_LARGE or 222
-
-ISVehicleDashboard.GAUGE_FUEL_X = ISVehicleDashboard.GAUGE_FUEL_X or 343
-ISVehicleDashboard.GAUGE_FUEL_Y = ISVehicleDashboard.GAUGE_FUEL_Y or 59
-ISVehicleDashboard.GAUGE_FUEL_X_LARGE = ISVehicleDashboard.GAUGE_FUEL_X_LARGE or 686
-ISVehicleDashboard.GAUGE_FUEL_Y_LARGE = ISVehicleDashboard.GAUGE_FUEL_Y_LARGE or 118
+ISVehicleDashboard.GAUGE_DASH_X,  ISVehicleDashboard.GAUGE_DASH_Y  = 0, 0
+ISVehicleDashboard.GAUGE_RPM_X,   ISVehicleDashboard.GAUGE_RPM_Y   = 211, 110
+ISVehicleDashboard.GAUGE_SPEED_X, ISVehicleDashboard.GAUGE_SPEED_Y = 428, 110
+ISVehicleDashboard.GAUGE_FUEL_X,  ISVehicleDashboard.GAUGE_FUEL_Y  = 320, 58
 
 -- Blink tuning for STOP light
 ISVehicleDashboard.WARN_STOP_BLINK_HZ   = ISVehicleDashboard.WARN_STOP_BLINK_HZ or 0.7
@@ -365,6 +230,7 @@ function ISVehicleDashboard:_newWarnImage(tex)
     local img = ISImage:new(0, 0, tex:getWidthOrig(), tex:getHeightOrig(), tex)
     img:initialise()
     img:instantiate()
+    YourDash_SetMouseTransparent(img)
 
     img.onclick = nil
     img.target = nil
@@ -375,6 +241,16 @@ function ISVehicleDashboard:_newWarnImage(tex)
 
     img:setVisible(false)
     img.__YourDashWarn = true
+    function img:render()
+        local offTex = self.__offTexture
+        if offTex then
+            self:drawTextureScaled(offTex, 0, 0, self.width, self.height, 1.0)
+        end
+        local a = self.backgroundColor and self.backgroundColor.a or 0
+        if self.texture and a > 0.001 then
+            self:drawTextureScaled(self.texture, 0, 0, self.width, self.height, a)
+        end
+    end
     self:addChild(img)
     return img
 end
@@ -392,7 +268,8 @@ function ISVehicleDashboard:_setWarn(img, on, tooltip, alphaMul, dt)
     -- per-icon fade target
     img.__fade = img.__fade or 0
     local targetFade = on and 1.0 or 0.0
-    local fadeTime   = on and self.WARN_FADE_IN_TIME or self.WARN_FADE_OUT_TIME
+    local response = self:_YourDashWarningResponse()
+    local fadeTime = on and response.fadeIn or response.fadeOut
     img.__fade = self._ease(img.__fade, targetFade, fadeTime, dt)
 
     -- global voltage sag dimmer (set in prerender)
@@ -403,7 +280,7 @@ function ISVehicleDashboard:_setWarn(img, on, tooltip, alphaMul, dt)
 
     local a = dim * mul * img.__fade
 
-    if a <= 0.01 then
+    if a <= 0.01 and not img.__offTexture then
         img:setVisible(false)
     else
         img:setVisible(true)
@@ -461,6 +338,21 @@ ISVehicleDashboard.CRANK_DIM_TIME  = ISVehicleDashboard.CRANK_DIM_TIME  or 0.1  
 ISVehicleDashboard.WARN_FADE_IN_TIME  = ISVehicleDashboard.WARN_FADE_IN_TIME  or 0.05
 ISVehicleDashboard.WARN_FADE_OUT_TIME = ISVehicleDashboard.WARN_FADE_OUT_TIME or 0.1
 
+-- Keep the proven standard response as the baseline while giving each authored
+-- cluster its own physical character.  These tables affect presentation only;
+-- no vehicle state or gauge mapping is changed.
+ISVehicleDashboard.YOURDASH_NEEDLE_RESPONSE = ISVehicleDashboard.YOURDASH_NEEDLE_RESPONSE or {
+    standard = { up = 0.30, down = 0.30, voltageDrop = 0.08, voltageRecover = 0.35 },
+    sport    = { up = 0.16, down = 0.20, voltageDrop = 0.05, voltageRecover = 0.22 },
+    heavy    = { up = 0.48, down = 0.55, voltageDrop = 0.12, voltageRecover = 0.50 },
+}
+
+ISVehicleDashboard.YOURDASH_WARNING_RESPONSE = ISVehicleDashboard.YOURDASH_WARNING_RESPONSE or {
+    standard = { fadeIn = 0.05,  fadeOut = 0.10, bulbPersistence = 1.00 },
+    sport    = { fadeIn = 0.025, fadeOut = 0.055, bulbPersistence = 0.65 },
+    heavy    = { fadeIn = 0.09,  fadeOut = 0.18, bulbPersistence = 1.35 },
+}
+
 -- Crank dim depends on battery charge (0..1)
 ISVehicleDashboard.CRANK_DIM_ALPHA_MIN = ISVehicleDashboard.CRANK_DIM_ALPHA_MIN or 0.20 -- very low charge
 ISVehicleDashboard.CRANK_DIM_ALPHA_MAX = ISVehicleDashboard.CRANK_DIM_ALPHA_MAX or 0.85 -- full charge
@@ -473,6 +365,7 @@ ISVehicleDashboard.CRANK_KICK_HOLD    = ISVehicleDashboard.CRANK_KICK_HOLD    or
 ISVehicleDashboard.CRANK_KICK_RECOVER = ISVehicleDashboard.CRANK_KICK_RECOVER or 0.18 -- seconds to ramp back to base
 ISVehicleDashboard.CRANK_DIM_TIME_DOWN = ISVehicleDashboard.CRANK_DIM_TIME_DOWN or 0.03
 ISVehicleDashboard.CRANK_DIM_TIME_UP   = ISVehicleDashboard.CRANK_DIM_TIME_UP   or 0.12
+ISVehicleDashboard.CRANK_VOLTAGE_KICK_DROP = ISVehicleDashboard.CRANK_VOLTAGE_KICK_DROP or 1.20
 
 -- Battery light “unstable voltage” flicker right when sag starts
 ISVehicleDashboard.CRANK_BATT_FLICKER_TIME  = ISVehicleDashboard.CRANK_BATT_FLICKER_TIME  or 1
@@ -501,6 +394,108 @@ function ISVehicleDashboard:_getCrankDimAlphaFromCharge()
     local c = math.pow(charge, gamma)
 
     return self.CRANK_DIM_ALPHA_MIN + (self.CRANK_DIM_ALPHA_MAX - self.CRANK_DIM_ALPHA_MIN) * c
+end
+
+function ISVehicleDashboard:_YourDashNeedleResponse()
+    local profiles = self.YOURDASH_NEEDLE_RESPONSE or {}
+    return profiles[self.__YourDashFamily or "standard"] or profiles.standard or {
+        up = self.NEEDLE_SMOOTHTIME_UP or 0.30,
+        down = self.NEEDLE_SMOOTHTIME_DOWN or 0.30,
+        voltageDrop = 0.08,
+        voltageRecover = 0.35,
+    }
+end
+
+function ISVehicleDashboard:_YourDashWarningResponse()
+    local profiles = self.YOURDASH_WARNING_RESPONSE or {}
+    return profiles[self.__YourDashFamily or "standard"] or profiles.standard or {
+        fadeIn = self.WARN_FADE_IN_TIME or 0.05,
+        fadeOut = self.WARN_FADE_OUT_TIME or 0.10,
+        bulbPersistence = 1.0,
+    }
+end
+
+function ISVehicleDashboard:_YourDashIsCranking()
+    local vehicle = self.vehicle
+    if not vehicle or vehicle:isEngineRunning() then return false end
+    if vehicle.isStarting and vehicle:isStarting() then return true end
+    return vehicle.isEngineStarted and vehicle:isEngineStarted() == true
+end
+
+-- Advance the starter envelope once per frame, then share the exact phase with
+-- both the illuminated bulb dimmer and the voltage needle.  The normalized
+-- kick is 1 during the initial starter hit and eases back to 0 while cranking,
+-- producing the visible partial voltage recovery rather than two unrelated
+-- effects that can drift by a frame.
+function ISVehicleDashboard:_YourDashUpdateCrankEnvelope(cranking, dt)
+    dt = tonumber(dt) or (1 / 30)
+    if dt < 0 then dt = 0 elseif dt > 0.25 then dt = 0.25 end
+    cranking = cranking == true
+
+    self.__crankDimDelayT = self.__crankDimDelayT or 0
+    self.__crankDimPrev = self.__crankDimPrev == true
+    if cranking then
+        if not self.__crankDimPrev then self.__crankDimDelayT = 0 end
+        self.__crankDimDelayT = self.__crankDimDelayT + dt
+    else
+        self.__crankDimDelayT = 0
+    end
+    self.__crankDimPrev = cranking
+
+    self.__crankSagPrev = self.__crankSagPrev == true
+    local sagActive = cranking and self.__crankDimDelayT >= (self.CRANK_DIM_DELAY or 0)
+    if sagActive and not self.__crankSagPrev then
+        self.__crankKickT = 0
+        self.__crankKickActive = true
+        self.__crankBattFlickerActive = true
+        self.__crankBattFlickerT = 0
+    end
+
+    if self.__crankBattFlickerActive then
+        self.__crankBattFlickerT = (self.__crankBattFlickerT or 0) + dt
+        if self.__crankBattFlickerT >= (self.CRANK_BATT_FLICKER_TIME or 0) then
+            self.__crankBattFlickerActive = false
+        end
+    end
+
+    if not cranking then
+        self.__crankBattFlickerActive = false
+        self.__crankBattFlickerT = 0
+        self.__crankKickActive = false
+        self.__crankKickT = 0
+    end
+    self.__crankSagPrev = sagActive
+
+    local kick01 = 0
+    if sagActive and self.__crankKickActive then
+        self.__crankKickT = (self.__crankKickT or 0) + dt
+        local hold = self.CRANK_KICK_HOLD or 0.05
+        local recover = self.CRANK_KICK_RECOVER or 0.18
+        if self.__crankKickT <= hold then
+            kick01 = 1
+        elseif recover > 0 and self.__crankKickT <= hold + recover then
+            local u = (self.__crankKickT - hold) / recover
+            if u < 0 then u = 0 elseif u > 1 then u = 1 end
+            local smoothstep = u * u * (3 - 2 * u)
+            kick01 = 1 - smoothstep
+        else
+            self.__crankKickActive = false
+            kick01 = 0
+        end
+    end
+
+    local dimTarget = 1
+    if sagActive then
+        dimTarget = self:_getCrankDimAlphaFromCharge() -
+            (self.CRANK_KICK_AMOUNT or 0.15) * kick01
+        if dimTarget < 0 then dimTarget = 0 end
+    end
+
+    self.__YourDashCranking = cranking
+    self.__YourDashCrankSagActive = sagActive
+    self.__YourDashCrankKick01 = kick01
+    self.__YourDashCrankDimTarget = dimTarget
+    return sagActive, kick01
 end
 
 -- =========================
@@ -542,6 +537,156 @@ function ISVehicleDashboard:_hasBatteryPower()
     return self.vehicle:getBatteryCharge() > 0
 end
 
+-- Vehicle alarms drive BaseVehicle:setHeadlightsOn() directly for each flash,
+-- so getHeadlightsOn() is not a stable representation of the driver's switch
+-- while an alarm is active.  Keep the last non-alarm state for the dashboard
+-- control and optimistically update it when this control is clicked.
+function ISVehicleDashboard:_YourDashIsAlarmActive()
+    local vehicle = self.vehicle
+    if not vehicle or not vehicle.isAlarmActive then return false end
+    local ok, active = pcall(vehicle.isAlarmActive, vehicle)
+    return ok and active == true
+end
+
+function ISVehicleDashboard:_YourDashGetHeadlightSwitchState()
+    local vehicle = self.vehicle
+    if not vehicle then return false end
+
+    local actual = vehicle:getHeadlightsOn() == true
+    if self:_YourDashIsAlarmActive() then
+        if self.__YourDashHeadlightSwitchOn == nil then
+            self.__YourDashHeadlightSwitchOn = actual
+        end
+        return self.__YourDashHeadlightSwitchOn == true
+    end
+
+    local pending = (self.__YourDashHeadlightSwitchPending or 0) > 0
+    if pending and actual ~= (self.__YourDashHeadlightSwitchOn == true) then
+        return self.__YourDashHeadlightSwitchOn == true
+    end
+
+    self.__YourDashHeadlightSwitchPending = 0
+    self.__YourDashHeadlightSwitchOn = actual
+    return actual
+end
+
+function ISVehicleDashboard:_YourDashPositionWindowState(state)
+    if not self.windowTex or not self.backgroundTex then return end
+    local layout = YourDash.GetLayout and YourDash.GetLayout(self) or nil
+    local controls = layout and layout.controls or nil
+    local key = state == "down" and "windowDown" or (state == "up" and "windowUp" or "window")
+    local point = controls and (controls[key] or controls.window) or nil
+    if not point then return end
+    local scale = YourDash.GetScale and YourDash.GetScale() or 1
+    local x = math.floor((point.x or point[1] or 0) * scale + 0.5)
+    local y = math.floor((point.y or point[2] or 0) * scale + 0.5)
+    self.windowTex:setX(self.backgroundTex:getX() + x)
+    self.windowTex:setY(self.backgroundTex:getY() + y)
+end
+
+function ISVehicleDashboard:_YourDashElectricalLoadUnits()
+    local v = self.vehicle
+    if not v then return 0 end
+    local units = v:getHeadlightsOn() and 1.0 or 0.0
+
+    local heater = v.getHeater and v:getHeater() or v:getPartById("Heater")
+    local hmd = heater and heater:getModData() or nil
+    if hmd and hmd.active then units = units + 1.4 end -- 0.000035 / vanilla 0.000025 rate
+
+    for i = 0, v:getPartCount() - 1 do
+        local part = v:getPartByIndex(i)
+        local data = part and part.getDeviceData and part:getDeviceData() or nil
+        if data and data.getIsTurnedOn and data:getIsTurnedOn() then
+            units = units + 1.0
+            break
+        end
+    end
+
+    local okLights, lightbarLights = pcall(function() return v:getLightbarLightsMode() end)
+    if okLights and lightbarLights and lightbarLights > 0 then units = units + 1.0 end
+    local okSiren, lightbarSiren = pcall(function() return v:getLightbarSirenMode() end)
+    if okSiren and lightbarSiren and lightbarSiren > 0 then units = units + 1.0 end
+    return units
+end
+
+function ISVehicleDashboard:_YourDashUpdateVoltage(dt, cranking)
+    local v = self.vehicle
+    if not v then self.__YourDashVoltage = 8.0 return end
+    local charge = v:getBatteryCharge() or 0
+    if charge > 1 then charge = charge / 100 end
+    if charge < 0 then charge = 0 elseif charge > 1 then charge = 1 end
+
+    local running = v:isEngineRunning()
+    if cranking == nil then cranking = self:_YourDashIsCranking() end
+    cranking = cranking == true and not running
+    local keyed = v:isKeysInIgnition() or v:isHotwired()
+
+    -- Battery charge is quantized and may replicate in discrete steps.  A
+    -- per-frame derivative turns each step into a voltage spike, so sample it
+    -- over a one-second window and low-pass the resulting presentation load.
+    local sampleDt = dt or (1 / 30)
+    if sampleDt < 0 then sampleDt = 0 elseif sampleDt > 0.25 then sampleDt = 0.25 end
+    if self.__YourDashBatterySampleCharge == nil or cranking then
+        self.__YourDashBatterySampleCharge = charge
+        self.__YourDashBatterySampleAge = 0
+        self.__YourDashMeasuredDrop = cranking and 0 or (self.__YourDashMeasuredDrop or 0)
+    else
+        self.__YourDashBatterySampleAge = (self.__YourDashBatterySampleAge or 0) + sampleDt
+        if self.__YourDashBatterySampleAge >= 1.0 then
+            local age = self.__YourDashBatterySampleAge
+            local delta = self.__YourDashBatterySampleCharge - charge
+            local rawDrop = 0
+            if delta > 0 then rawDrop = math.min(0.6, (delta / age) * 200) end
+            local alpha = 1 - math.exp(-age / 2.5)
+            local filtered = self.__YourDashMeasuredDrop or 0
+            self.__YourDashMeasuredDrop = filtered + (rawDrop - filtered) * alpha
+            self.__YourDashBatterySampleCharge = charge
+            self.__YourDashBatterySampleAge = 0
+        end
+    end
+    local measuredDrop = self.__YourDashMeasuredDrop or 0
+
+    local target
+    if running then
+        target = 14.6
+    elseif cranking then
+        if self.__YourDashCrankSagActive then
+            -- The steady starter load remains the requested 8V..11V by battery
+            -- charge.  The shared first-phase kick drops it farther, then the
+            -- same envelope that drives bulb dimming recovers partway.
+            target = 8.0 + 3.0 * charge -
+                (self.CRANK_VOLTAGE_KICK_DROP or 1.20) * (self.__YourDashCrankKick01 or 0)
+        else
+            -- isStarting() includes the short pre-starter phase.  Hold normal
+            -- keyed voltage until the common delayed sag envelope engages.
+            target = charge > 0 and (10.0 + 2.8 * charge) or 8.0
+        end
+    elseif keyed and charge > 0 then
+        target = 10.0 + 2.8 * charge
+    else
+        target = 8.0
+    end
+
+    if not cranking and (keyed or running) then
+        -- Relative weights come from B42's own battery-drain rates; volts are only presentation.
+        self.__YourDashLoadSampleT = (self.__YourDashLoadSampleT or 0) - (dt or 1/30)
+        if self.__YourDashLoadSampleT <= 0 then
+            self.__YourDashLoadUnits = self:_YourDashElectricalLoadUnits()
+            self.__YourDashLoadSampleT = 0.20
+        end
+        target = target - math.min(1.0, (self.__YourDashLoadUnits or 0) * 0.18) - measuredDrop
+    end
+    if target < 7.5 then target = 7.5 elseif target > 15.0 then target = 15.0 end
+
+    self.__YourDashVoltage = self.__YourDashVoltage or target
+    self.__YourDashVoltageVel = self.__YourDashVoltageVel or 0
+    local response = self:_YourDashNeedleResponse()
+    local smooth = target < self.__YourDashVoltage and
+        (response.voltageDrop or 0.08) or (response.voltageRecover or 0.35)
+    self.__YourDashVoltage, self.__YourDashVoltageVel = self._smoothDamp(
+        self.__YourDashVoltage, target, self.__YourDashVoltageVel, smooth, 100, dt or 1/30)
+end
+
 function ISVehicleDashboard:onClickWindow()
     if getGameSpeed() == 0 then return end
     if getGameSpeed() > 1 then setGameSpeed(1) end
@@ -551,8 +696,34 @@ function ISVehicleDashboard:onClickWindow()
     if not windowPart then return end
 
     local w = windowPart:getWindow()
-    local shouldOpen = not w:isOpen() -- if open now -> close; else open
+    local family = self.__YourDashFamily or "standard"
+    local command = self.__YourDashWindowCommand
+    local directional = family == "heavy" or family == "sport"
+    local shouldOpen
+    if directional and command then
+        -- Upper half raises/closes; lower half lowers/opens, irrespective of
+        -- the window's current state.
+        shouldOpen = command == "down"
+    else
+        -- Preserve the proven single-action standard switch behavior.
+        shouldOpen = not w:isOpen()
+    end
+    if shouldOpen == w:isOpen() then return end
     ISVehiclePartMenu.onOpenCloseWindow(self.character, windowPart, shouldOpen)
+end
+
+local _YourDashOldOnClickHeadlights = ISVehicleDashboard.onClickHeadlights
+function ISVehicleDashboard:onClickHeadlights()
+    -- Mirror vanilla's paused-game guard before changing the optimistic UI
+    -- state, otherwise a rejected click briefly shows the opposite position.
+    if getGameSpeed and getGameSpeed() == 0 then return end
+    if self.vehicle then
+        self.__YourDashHeadlightSwitchOn = not self:_YourDashGetHeadlightSwitchState()
+        self.__YourDashHeadlightSwitchPending = 1.0
+    end
+    if _YourDashOldOnClickHeadlights then
+        return _YourDashOldOnClickHeadlights(self)
+    end
 end
 
 function ISVehicleDashboard:_applyLidMode(lidOn)
@@ -692,8 +863,8 @@ function ISVehicleDashboard:_YourDashApplyGearFont(useLarge)
     if not self.btn_partSpeed then return end
     useLarge = (useLarge == true)
 
-    local font = useLarge and (self.GEAR_FONT_LARGE or UIFont.Large)
-                         or  (self.GEAR_FONT_REG   or UIFont.Small)
+    local font = (YourDash.GetUIFont and YourDash.GetUIFont()) or
+        (useLarge and (self.GEAR_FONT_LARGE or UIFont.Large) or (self.GEAR_FONT_REG or UIFont.Small))
 
     -- Works across versions: some builds have setFont, some just expose .font
     if self.btn_partSpeed.setFont then
@@ -716,141 +887,196 @@ end
 
 
 -- =========================
--- Apply texture set + offsets (Regular vs Large)
+-- Apply family/scale texture set and data-driven offsets.
 -- =========================
 function ISVehicleDashboard:_YourDashApplyOffsets(useLarge)
-    useLarge = (useLarge == true)
-
-    if useLarge then
-        self.dashOffset  = { x = self.GAUGE_DASH_X_LARGE,  y = self.GAUGE_DASH_Y_LARGE }
-        self.rpmOffset   = { x = self.GAUGE_RPM_X_LARGE,   y = self.GAUGE_RPM_Y_LARGE }
-        self.speedOffset = { x = self.GAUGE_SPEED_X_LARGE, y = self.GAUGE_SPEED_Y_LARGE }
-        self.fuelOffset  = { x = self.GAUGE_FUEL_X_LARGE,  y = self.GAUGE_FUEL_Y_LARGE }
-    else
-        self.dashOffset  = { x = self.GAUGE_DASH_X,  y = self.GAUGE_DASH_Y }
-        self.rpmOffset   = { x = self.GAUGE_RPM_X,   y = self.GAUGE_RPM_Y }
-        self.speedOffset = { x = self.GAUGE_SPEED_X, y = self.GAUGE_SPEED_Y }
-        self.fuelOffset  = { x = self.GAUGE_FUEL_X,  y = self.GAUGE_FUEL_Y }
+    local layout = YourDash.GetLayout and YourDash.GetLayout(self) or nil
+    local gauges = layout and (layout.gauges or layout.gauge) or nil
+    local scale = YourDash.GetScale and YourDash.GetScale() or (useLarge and 2 or 1)
+    local function point(name, fallbackX, fallbackY)
+        local p = gauges and gauges[name] or nil
+        local x = p and (p.x or p[1]) or fallbackX
+        local y = p and (p.y or p[2]) or fallbackY
+        return { x = math.floor((x or 0) * scale + 0.5), y = math.floor((y or 0) * scale + 0.5) }
     end
+
+    self.dashOffset    = point("dash",  0, 0)
+    self.rpmOffset     = point("rpm",   self.GAUGE_RPM_X, self.GAUGE_RPM_Y)
+    self.speedOffset   = point("speed", self.GAUGE_SPEED_X, self.GAUGE_SPEED_Y)
+    self.fuelOffset    = point("fuel",  self.GAUGE_FUEL_X, self.GAUGE_FUEL_Y)
+    self.voltageOffset = point("voltage", self.GAUGE_FUEL_X, self.GAUGE_FUEL_Y)
 end
 
-function ISVehicleDashboard:_YourDashApplyTextureSet(useLarge, isInit)
-    useLarge = (useLarge == true)
-    self.__YourDashLarge = useLarge
+function ISVehicleDashboard:_YourDashScaleIgnition()
+    local img = self.ignitionTex
+    local tex = img and img.texture or nil
+    if not img or not tex then return end
+    local scale = YourDash.GetScale and YourDash.GetScale() or 1
+    local w = math.max(1, math.floor(tex:getWidthOrig() * scale + 0.5))
+    local h = math.max(1, math.floor(tex:getHeightOrig() * scale + 0.5))
+    img:setWidth(w)
+    img:setHeight(h)
+    img.autoScale = true
+    img.scaledWidth, img.scaledHeight = w, h
+end
 
-    -- Flush caches so stain/cracks re-resolve correct pack
+function ISVehicleDashboard:_YourDashEnsureStateLEDs()
+    local function ensure(field)
+        local img = self[field]
+        if not img and self.__led_off then
+            img = ISImage:new(0, 0, self.__led_off:getWidthOrig(), self.__led_off:getHeightOrig(), self.__led_off)
+            img:initialise()
+            img:instantiate()
+            img.backgroundColor = { r=1, g=1, b=1, a=1 }
+            img.onclick, img.target, img.mouseovertext = nil, nil, nil
+            YourDash_SetMouseTransparent(img)
+            self:addChild(img)
+            self[field] = img
+        end
+        if img then
+            if self.__led_off then
+                self:_setImageTextureAndSize(img, self.__led_off)
+                img:setVisible(true)
+            else
+                img:setVisible(false)
+            end
+        end
+    end
+    ensure("__YourDashDoorLED")
+    ensure("__YourDashTrunkLED")
+end
+
+function ISVehicleDashboard:_YourDashApplyTextureSet(_useLarge, isInit)
+    local family = self.__YourDashFamily or "standard"
+    local accent = self.__YourDashAccent or "base"
+    local scaleKey = YourDash.GetScaleKey and YourDash.GetScaleKey() or "1x"
+    local setKey = family .. ":" .. accent .. ":" .. scaleKey
+    self.__YourDashRetainedStainLevel = self.__stainLevel
+    self.__YourDashRetainedStainVariant = self.__stainVariant
+    self.__YourDashTextureKey = setKey
+    self.__YourDashLarge = (scaleKey == "2x") -- compatibility for older helper modules
+
     self.__YourDashStainCache = {}
     self.__YourDashCrackCache = {}
-    self.__stainTex = nil
-    self.__crackTex = nil
-    self.__stainLevel = nil
-    self.__crackLevel = nil
+    self.__stainTex, self.__crackTex = nil, nil
+    self.__stainLevel, self.__crackLevel = nil, nil
 
-    local function tex(path, fallback)
-        return YourDash.GetTexture(path, fallback)
+    local function rawTex(whichFamily, group, name)
+        local path = string.format("media/ui/vehicles/%s/%s/%s/%s", whichFamily, group, scaleKey, name)
+        return getTexture(path)
+    end
+    local function tex(name, fallbackFamily)
+        local t = nil
+        if YourDash.GetDashboardTexture then
+            t = YourDash.GetDashboardTexture(family, "dash", name, fallbackFamily)
+        else
+            t = rawTex(family, "dash", name)
+        end
+        if (not t) and fallbackFamily then t = rawTex(fallbackFamily, "dash", name) end
+        return t
     end
 
-    -- Gauge (printed) + lid/backlight + dash overlay
-    self.__bg_day = tex("media/ui/vehicles/gauge.png") or self.dashboardBG
-    self.__bg_lid = tex("media/ui/vehicles/gauge_lid.png") or self.__bg_day
-    self.__dashTex = tex("media/ui/vehicles/dash.png")
+    self.__bg_day = tex("gauge.png") or self.dashboardBG
+    self.__bg_lid = tex("gauge_lid.png") or self.__bg_day
+    local dashName = "dash.png"
+    if family == "sport" then dashName = "dash_" .. accent .. ".png" end
+    self.__dashTex = tex(dashName) or tex("dash_base.png") or tex("dash.png")
+    self.__dashShadowTex = tex("dash_shadow.png")
 
-    if self.__bg_day then
-        self.dashboardBG = self.__bg_day
-    end
-
+    if self.__bg_day then self.dashboardBG = self.__bg_day end
     if self.dashboardBG then
-        self:setWidth(self.dashboardBG:getWidth())
-        self:setHeight(self.dashboardBG:getHeight())
+        self:setWidth(self.dashboardBG:getWidthOrig())
+        self:setHeight(self.dashboardBG:getHeightOrig())
     end
 
-    -- Warning light textures
-    self.__warn_cruise  = tex("media/ui/vehicles/warning_cruise.png")
-    self.__warn_battery = tex("media/ui/vehicles/warning_battery.png")
-    self.__warn_brake   = tex("media/ui/vehicles/warning_brake.png")
-    self.__warn_check   = tex("media/ui/vehicles/warning_check.png")
-    self.__warn_stop    = tex("media/ui/vehicles/warning_stop.png")
-    self.__warn_door    = tex("media/ui/vehicles/warning_door.png")
-    self.__warn_fuel    = tex("media/ui/vehicles/warning_fuel.png")
-    self.__warn_light   = tex("media/ui/vehicles/warning_light.png")
+    local warningNames = { "cruise", "battery", "brake", "check", "stop", "door", "fuel", "light" }
+    for _, name in ipairs(warningNames) do
+        self["__warn_" .. name] = tex("warning_" .. name .. ".png")
+        self["__warn_" .. name .. "_off"] = (family == "heavy") and tex("warning_" .. name .. "_off.png") or nil
+    end
 
-    if self.warnCruiseTex  then self:_setImageTextureAndSize(self.warnCruiseTex,  self.__warn_cruise)  end
-    if self.warnBatteryTex then self:_setImageTextureAndSize(self.warnBatteryTex, self.__warn_battery) end
-    if self.warnBrakeTex   then self:_setImageTextureAndSize(self.warnBrakeTex,   self.__warn_brake)   end
-    if self.warnCheckTex   then self:_setImageTextureAndSize(self.warnCheckTex,   self.__warn_check)   end
-    if self.warnStopTex    then self:_setImageTextureAndSize(self.warnStopTex,    self.__warn_stop)    end
-    if self.warnDoorTex    then self:_setImageTextureAndSize(self.warnDoorTex,    self.__warn_door)    end
-    if self.warnFuelTex    then self:_setImageTextureAndSize(self.warnFuelTex,    self.__warn_fuel)    end
-    if self.warnLightTex   then self:_setImageTextureAndSize(self.warnLightTex,   self.__warn_light)   end
+    local warningImages = {
+        cruise=self.warnCruiseTex, battery=self.warnBatteryTex, brake=self.warnBrakeTex,
+        check=self.warnCheckTex, stop=self.warnStopTex, door=self.warnDoorTex,
+        fuel=self.warnFuelTex, light=self.warnLightTex,
+    }
+    for name, img in pairs(warningImages) do
+        local onTex = self["__warn_" .. name]
+        if img and onTex then self:_setImageTextureAndSize(img, onTex) end
+        if img then img.__offTexture = self["__warn_" .. name .. "_off"] end
+    end
 
-    -- Needles (day + lid)
-    self.__needleLong_day  = tex("media/ui/vehicles/needle_long.png")
-    self.__needleLong_lid  = tex("media/ui/vehicles/needle_long_lid.png")  or self.__needleLong_day
-    self.__needleShort_day = tex("media/ui/vehicles/needle_short.png")
-    self.__needleShort_lid = tex("media/ui/vehicles/needle_short_lid.png") or self.__needleShort_day
-    self.needleCenter      = tex("media/ui/vehicles/needle_center.png")
+    self.__needleLong_day  = tex("needle_long.png")
+    self.__needleLong_lid  = tex("needle_long_lid.png") or self.__needleLong_day
+    self.__needleMid_day   = tex("needle_mid.png")
+    self.__needleMid_lid   = tex("needle_mid_lid.png") or self.__needleMid_day
+    self.__needleShort_day = tex("needle_short.png")
+    self.__needleShort_lid = tex("needle_short_lid.png") or self.__needleShort_day
+    self.needleCenter      = tex("needle_center.png")
 
-    -- Fuel arrows (day + lid)
-    self.__fuelL_day = tex("media/ui/vehicles/fuelL.png")
-    self.__fuelR_day = tex("media/ui/vehicles/fuelR.png")
-    self.__fuelL_lid = tex("media/ui/vehicles/fuelL_lid.png") or self.__fuelL_day
-    self.__fuelR_lid = tex("media/ui/vehicles/fuelR_lid.png") or self.__fuelR_day
+    self.__fuelL_day = tex("fuelL.png")
+    self.__fuelR_day = tex("fuelR.png")
+    self.__fuelL_lid = tex("fuelL_lid.png") or self.__fuelL_day
+    self.__fuelR_lid = tex("fuelR_lid.png") or self.__fuelR_day
+    self.needleLong, self.needleShort = self.__needleLong_day, self.__needleShort_day
+    self.leftSideFuelTex, self.rightSideFuelTex = self.__fuelL_day, self.__fuelR_day
 
-    -- Day set (base)
-    self.needleLong   = self.__needleLong_day
-    self.needleShort  = self.__needleShort_day
-    self.leftSideFuelTex  = self.__fuelL_day
-    self.rightSideFuelTex = self.__fuelR_day
-
-    -- Update actual arrow images if present
-    if self.leftSideFuel  and self.__fuelL_day then self:_setImageTextureAndSize(self.leftSideFuel,  self.__fuelL_day) end
+    if self.leftSideFuel and self.__fuelL_day then self:_setImageTextureAndSize(self.leftSideFuel, self.__fuelL_day) end
     if self.rightSideFuel and self.__fuelR_day then self:_setImageTextureAndSize(self.rightSideFuel, self.__fuelR_day) end
-    if self.leftSideFuelLid  and self.__fuelL_lid then self:_setImageTextureAndSize(self.leftSideFuelLid,  self.__fuelL_lid) end
+    if self.leftSideFuelLid and self.__fuelL_lid then self:_setImageTextureAndSize(self.leftSideFuelLid, self.__fuelL_lid) end
     if self.rightSideFuelLid and self.__fuelR_lid then self:_setImageTextureAndSize(self.rightSideFuelLid, self.__fuelR_lid) end
 
-    -- Door lock textures
-    self.__lock_off     = tex("media/ui/vehicles/lock_off.png")
-    self.__lock_partial = tex("media/ui/vehicles/lock_partial.png") or self.__lock_off
-    self.__lock_on      = tex("media/ui/vehicles/lock_on.png")      or self.__lock_off
+    if family == "heavy" then
+        self.__lock_off, self.__lock_partial, self.__lock_on = tex("btn_off.png"), tex("btn_off.png"), tex("btn_on.png")
+        self.__trunk_off, self.__trunk_on = tex("btn_off.png"), tex("btn_on.png")
+        -- The exported filenames are logically reversed: *_on is the released
+        -- OFF artwork and *_off is the pressed ON artwork.
+        self.__light_knob_off, self.__light_knob_on = tex("light_knob_on.png"), tex("light_knob_off.png")
+        self.__light_knob = self.__light_knob_off or self.__light_knob_on
+        self.__window_switch = tex("window_switch.png")
+        self.__window_switch_push = tex("window_switch_down.png") or self.__window_switch
+        self.__window_switch_pull = tex("window_switch_up.png") or self.__window_switch
+    else
+        self.__lock_off = tex("lock_off.png")
+        self.__lock_partial = tex("lock_partial.png") or self.__lock_off
+        self.__lock_on = tex("lock_on.png") or self.__lock_off
+        self.__trunk_off = tex("trunk_off.png")
+        self.__trunk_on = tex("trunk_on.png") or self.__trunk_off
+        self.__light_knob_off, self.__light_knob_on = nil, nil
+        self.__light_knob = tex("light_knob.png")
+        self.__window_switch = tex("window_switch.png")
+        self.__window_switch_push = tex("window_switch_down.png") or tex("window_switch_push.png") or self.__window_switch
+        self.__window_switch_pull = tex("window_switch_up.png") or tex("window_switch_pull.png") or self.__window_switch
+    end
+    self.__blank_btn = tex("blank_btn.png")
+    self.__led_off, self.__led_partial, self.__led_on = tex("led_off.png"), tex("led_partial.png"), tex("led_on.png")
+
     if self.__lock_off then self.iconDoor = self.__lock_off end
-    if self.doorTex and self.__lock_off then self:_setImageTextureAndSize(self.doorTex, self.__lock_off) end
-
-    -- Trunk textures + blank
-    self.__trunk_off = tex("media/ui/vehicles/trunk_off.png")
-    self.__trunk_on  = tex("media/ui/vehicles/trunk_on.png") or self.__trunk_off
-    self.__blank_btn = tex("media/ui/vehicles/blank_btn.png")
     if self.__trunk_off then self.iconTrunk = self.__trunk_off end
-    if self.trunkTex and self.__trunk_off then self:_setImageTextureAndSize(self.trunkTex, self.__trunk_off) end
-
-    -- Light knob
-    self.__light_knob = tex("media/ui/vehicles/light_knob.png")
     if self.__light_knob then self.iconLights = self.__light_knob end
+    if self.doorTex and self.__lock_off then self:_setImageTextureAndSize(self.doorTex, self.__lock_off) end
+    if self.trunkTex and self.__trunk_off then self:_setImageTextureAndSize(self.trunkTex, self.__trunk_off) end
     if self.lightsTex and self.__light_knob then self:_setImageTextureAndSize(self.lightsTex, self.__light_knob) end
-
-    -- Window switch
-    self.__window_switch      = tex("media/ui/vehicles/window_switch.png")
-    self.__window_switch_push = tex("media/ui/vehicles/window_switch_push.png") or self.__window_switch
-    self.__window_switch_pull = tex("media/ui/vehicles/window_switch_pull.png") or self.__window_switch
     if self.windowTex and self.__window_switch then self:_setImageTextureAndSize(self.windowTex, self.__window_switch) end
+    -- Heavy binary controls carry their pressed/released depth in separate
+    -- textures.  Do not add the generic click-scale animation on top.
+    local binaryPressedScale = family == "heavy" and 1.0 or 0.96
+    if self.doorTex then self.doorTex.__pressedScale = binaryPressedScale end
+    if self.trunkTex then self.trunkTex.__pressedScale = binaryPressedScale end
+    if self.children then self:_YourDashEnsureStateLEDs() end
 
-    -- Update background image if already created
     if self.backgroundTex and self.dashboardBG then
         self.backgroundTex.texture = self.dashboardBG
-        self.backgroundTex:setWidth(self.dashboardBG:getWidth())
-        self.backgroundTex:setHeight(self.dashboardBG:getHeight())
+        self.backgroundTex:setWidth(self.dashboardBG:getWidthOrig())
+        self.backgroundTex:setHeight(self.dashboardBG:getHeightOrig())
     end
 
-    -- Apply offsets for this size
-    self:_YourDashApplyOffsets(useLarge)
-
-    -- Reposition/rescale everything
-    if (not isInit) and self.onResolutionChange then
-        self:onResolutionChange()
-    end
+    self:_YourDashApplyOffsets(self.__YourDashLarge)
+    if (not isInit) and self.onResolutionChange then self:onResolutionChange() end
 end
 
 -- =========================
--- Stain layer (below dash.png)
+-- Stain layer (rendered by the final glass/wear overlay)
 -- =========================
 ISVehicleDashboard.STAIN_VARIANTS_PER_LEVEL = ISVehicleDashboard.STAIN_VARIANTS_PER_LEVEL or 5
 
@@ -897,8 +1123,9 @@ function ISVehicleDashboard:_getStainTex(level, variant)
     if cached == false then return nil end
     if cached then return cached end
 
-    local path = string.format("media/ui/vehicles/stain/level_%d_%d.png", level, variant)
-    local tex = YourDash.GetTexture(path)
+    local name = string.format("level_%d_%d.png", level, variant)
+    local tex = YourDash.GetDashboardTexture and
+        YourDash.GetDashboardTexture(self.__YourDashFamily or "standard", "stain", name) or nil
     self.__YourDashStainCache[key] = tex or false
     return tex
 end
@@ -945,9 +1172,16 @@ function ISVehicleDashboard:_updateStainLayer()
         self.__stainLevel = level
         self.__stainSeatCond = cond
 
-        local var, tex = self:_pickStainVariant(level)
+        local var, tex = nil, nil
+        if self.__YourDashRetainedStainLevel == level and self.__YourDashRetainedStainVariant then
+            var = self.__YourDashRetainedStainVariant
+            tex = self:_getStainTex(level, var)
+        end
+        if not tex then var, tex = self:_pickStainVariant(level) end
         self.__stainVariant = var
         self.__stainTex = tex
+        self.__YourDashRetainedStainLevel = nil
+        self.__YourDashRetainedStainVariant = nil
     end
 end
 
@@ -978,9 +1212,7 @@ function ISVehicleDashboard:_crackLevelFromWindshieldCondition(cond)
     return 4
 end
 
--- load crack texture for a level (supports BOTH naming schemes)
--- preferred: cracks/level_1.png .. level_4.png
--- fallback:  cracks/level_1_1.png .. level_4_1.png (if you kept old pattern)
+-- Load the single authored crack texture for a level.
 function ISVehicleDashboard:_getCrackTex(level)
     self.__YourDashCrackCache = self.__YourDashCrackCache or {}
     local cached = self.__YourDashCrackCache[level]
@@ -988,10 +1220,9 @@ function ISVehicleDashboard:_getCrackTex(level)
         return cached or nil
     end
 
-    local tex = YourDash.GetTexture(string.format("media/ui/vehicles/cracks/level_%d.png", level))
-    if not tex then
-        tex = YourDash.GetTexture(string.format("media/ui/vehicles/cracks/level_%d_1.png", level))
-    end
+    local family = self.__YourDashFamily or "standard"
+    local name = string.format("level_%d.png", level)
+    local tex = YourDash.GetDashboardTexture and YourDash.GetDashboardTexture(family, "cracks", name) or nil
 
 
     self.__YourDashCrackCache[level] = tex or false
@@ -1100,49 +1331,6 @@ function ISVehicleDashboard:_getWindshieldCondition()
     return cond
 end
 
--- Mark warn lights so we don't accidentally move them above glass
--- Add this line inside _newWarnImage after instantiate():
--- img.__YourDashWarn = true
-
-function ISVehicleDashboard:_YourDashMoveChildToTop(child)
-    if not child then return end
-    if child == self.backgroundTex then return end
-    if child == self.__YourDashGlassOverlay then return end
-    if child.__YourDashWarn then return end
-
-    if child.bringToTop then
-        child:bringToTop()
-        return
-    end
-    if self.removeChild and self.addChild then
-        self:removeChild(child)
-        self:addChild(child)
-    end
-end
-
-function ISVehicleDashboard:_YourDashBringControlsAboveGlass()
-    -- known vanilla/custom controls
-    self:_YourDashMoveChildToTop(self.doorTex)
-    self:_YourDashMoveChildToTop(self.trunkTex)
-    self:_YourDashMoveChildToTop(self.lightsTex)
-    self:_YourDashMoveChildToTop(self.windowTex)
-    self:_YourDashMoveChildToTop(self.ignitionTex)
-
-    -- AC
-    self:_YourDashMoveChildToTop(self.heaterTex)
-    self:_YourDashMoveChildToTop(self.acTempSlider)
-
-    -- Also bring any other clickable child (radio buttons, etc.)
-    if self.children then
-        for i = 1, #self.children do
-            local c = self.children[i]
-            if c and c.onclick and (not c.__YourDashWarn) and c ~= self.backgroundTex and c ~= self.__YourDashGlassOverlay then
-                self:_YourDashMoveChildToTop(c)
-            end
-        end
-    end
-end
-
 function ISVehicleDashboard:_YourDashEnsureGlassOverlay()
     if self.__YourDashGlassOverlay then return end
     if not self.backgroundTex then return end
@@ -1155,14 +1343,16 @@ function ISVehicleDashboard:_YourDashEnsureGlassOverlay()
     o.target = self
     o.__YourDashGlass = true
 
-    -- Don’t consume mouse
+    -- This visual layer covers the whole dashboard, so it must be truly
+    -- click-through.  B42 exposes setWantMouseEvents(), not
+    -- setConsumeMouseEvents(), on Lua UI elements.
     o.onclick = nil
     function o:onMouseDown() return false end
     function o:onMouseUp() return false end
     function o:onMouseMove(dx,dy) end
     function o:onMouseMoveOutside(dx,dy) end
     function o:onMouseUpOutside(x,y) return false end
-    if o.setConsumeMouseEvents then o:setConsumeMouseEvents(false) end
+    YourDash_SetMouseTransparent(o)
 
     function o:render()
         local dash = self.target or self.parent
@@ -1172,13 +1362,22 @@ function ISVehicleDashboard:_YourDashEnsureGlassOverlay()
 
         local wearA = (YourDash and YourDash.GetWearFxAlpha and YourDash.GetWearFxAlpha()) or 0.90
 
-        -- ORDER: cracks below stain below dash overlay
-        if wearA > 0 then
-            if dash.__crackTex then self:drawTextureScaled(dash.__crackTex, 0, 0, w, h, wearA) end
-            if dash.__stainTex then self:drawTextureScaled(dash.__stainTex, 0, 0, w, h, wearA) end
+        local function drawWear(tex, alpha)
+            if not tex then return end
+            local tw = tex:getWidthOrig()
+            self:drawTexture(tex, math.floor((w - tw) * 0.5), 0, alpha)
         end
 
-        if dash.__dashTex then self:drawTextureScaled(dash.__dashTex, 0, 0, w, h, 1) end
+        -- Physical glass effects sit above the instruments.  Use each authored
+        -- canvas at its native pack resolution; several sport canvases include
+        -- a deliberate one-pixel padding difference from the gauge texture.
+        if wearA > 0 then
+            drawWear(dash.__crackTex, wearA)
+            drawWear(dash.__stainTex, wearA)
+        end
+
+        -- The base/ticks/shadow stack is rendered by backgroundTex.  This
+        -- final panel is only the physical glass wear layer.
     end
 
 
@@ -1195,6 +1394,17 @@ function ISVehicleDashboard:_YourDashPositionGlassOverlay()
     o:setHeight(self.backgroundTex:getHeight())
 end
 
+function ISVehicleDashboard:_YourDashFinalizeWearOrder()
+    local overlay = self.__YourDashGlassOverlay
+    if not overlay then return end
+    if overlay.bringToTop then
+        overlay:bringToTop()
+    elseif self.removeChild and self.addChild then
+        self:removeChild(overlay)
+        self:addChild(overlay)
+    end
+end
+
 
 -- =========================
 -- Patch: new()
@@ -1202,6 +1412,10 @@ end
 local _oldNew = ISVehicleDashboard.new
 function ISVehicleDashboard:new(playerNum, chr)
     local o = _oldNew(self, playerNum, chr)
+
+    -- Vehicle profile is resolved in setVehicle(); standard is the safe startup pack.
+    o.__YourDashFamily = "standard"
+    o.__YourDashAccent = "base"
 
     -- Apply selected texture pack + offsets
     local useLarge = YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures() or false
@@ -1276,6 +1490,7 @@ function ISVehicleDashboard:createChildren()
         local img = ISImage:new(0, 0, tex:getWidthOrig(), tex:getHeightOrig(), tex)
         img:initialise()
         img:instantiate()
+        YourDash_SetMouseTransparent(img)
         img.onclick = nil
         img.target = nil
         img.mouseovertext = nil
@@ -1302,6 +1517,14 @@ function ISVehicleDashboard:createChildren()
     self.warnDoorTex    = self.warnDoorTex    or self:_newWarnImage(self.__warn_door)
     self.warnFuelTex    = self.warnFuelTex    or self:_newWarnImage(self.__warn_fuel)
     self.warnLightTex   = self.warnLightTex   or self:_newWarnImage(self.__warn_light)
+    self.warnCruiseTex.__offTexture  = self.__warn_cruise_off
+    self.warnBatteryTex.__offTexture = self.__warn_battery_off
+    self.warnBrakeTex.__offTexture   = self.__warn_brake_off
+    self.warnCheckTex.__offTexture   = self.__warn_check_off
+    self.warnStopTex.__offTexture    = self.__warn_stop_off
+    self.warnDoorTex.__offTexture    = self.__warn_door_off
+    self.warnFuelTex.__offTexture    = self.__warn_fuel_off
+    self.warnLightTex.__offTexture   = self.__warn_light_off
 
 
     -- =========================
@@ -1316,54 +1539,78 @@ function ISVehicleDashboard:createChildren()
         p.target = self
         p.__YourDashNeedles = true
         p.onclick = nil
-        if p.setConsumeMouseEvents then p:setConsumeMouseEvents(false) end
+        YourDash_SetMouseTransparent(p)
 
         function p:render()
             local dash = self.target
             if not dash or not dash.vehicle then return end
 
-            -- values already updated in dash:prerender()
-            local rpmVal   = math.max(0, math.min(1, dash.rpmValue  or 0.0))
+            local family = dash.__YourDashFamily or "standard"
+            local rpmVal = math.max(0, math.min(1, dash.rpmValue or 0.0))
             local speedVal = math.max(0, math.min(1, dash.speedValue or 0.0))
-            local fuelVal  = math.max(0, math.min(1, dash.fuelValue  or 0.0))
+            local fuelVal = math.max(0, math.min(1, dash.fuelValue or 0.0))
+            local rpm = rpmVal * 7000
+            local mph = math.max(0, dash.__YourDashSmoothMPH or 0)
+            local volts = dash.__YourDashVoltage or 8.0
 
-            local rpmAngle  = math.deg(dash.RPM_MIN_ANGLE + (dash.RPM_MAX_ANGLE - dash.RPM_MIN_ANGLE) * rpmVal)
-            local fuelAngle = math.deg(dash.FUEL_MIN_ANGLE + (dash.FUEL_MAX_ANGLE - dash.FUEL_MIN_ANGLE) * fuelVal)
-
-            local mph = speedVal * 120.0
-            if mph < 0 then mph = 0 elseif mph > 120 then mph = 120 end
-
-            local speedAngle
-            if mph <= 20.0 then
-                speedAngle = mph * 1.125
+            local rpmAngle, speedAngle, fuelAngle, voltageAngle
+            if family == "heavy" then
+                rpmAngle = -30 + math.min(rpm, 6000) / 6000 * 240
+                if mph <= 5 then
+                    speedAngle = -30
+                else
+                    speedAngle = -30 + ((math.min(mph, 90) - 5) / 10) * 30
+                end
+                -- Heavy short-needle artwork is authored pointing +90 degrees
+                -- at texture angle zero.  Subtract that baked-in direction so
+                -- the physical endpoints remain 25 degrees through 155 degrees
+                -- from west.  Voltage spans the printed 8V..18V scale.
+                fuelAngle = (25 + fuelVal * 130) - 90
+                voltageAngle = (25 + math.max(0, math.min(1, (volts - 8) / 10)) * 130) - 90
+            elseif family == "sport" then
+                rpmAngle = -45 + math.min(rpm, 7000) / 7000 * 270
+                speedAngle = -45 + math.min(mph, 160) / 160 * 270
+                fuelAngle = -65 + fuelVal * 130
+                voltageAngle = 245 - math.max(0, math.min(1, (volts - 8) / 8)) * 130
             else
-                speedAngle = 22.5 + (mph - 20.0) * 1.875
+                -- Preserve the proven standard-dash mappings exactly.
+                rpmAngle = math.deg(dash.RPM_MIN_ANGLE + (dash.RPM_MAX_ANGLE - dash.RPM_MIN_ANGLE) * rpmVal)
+                fuelAngle = math.deg(dash.FUEL_MIN_ANGLE + (dash.FUEL_MAX_ANGLE - dash.FUEL_MIN_ANGLE) * fuelVal)
+                local legacyMph = speedVal * 120.0
+                if legacyMph <= 20.0 then
+                    speedAngle = legacyMph * 1.125
+                else
+                    speedAngle = 22.5 + (legacyMph - 20.0) * 1.875
+                end
+                if speedAngle < 0 then speedAngle = 0 elseif speedAngle > 210 then speedAngle = 210 end
             end
-            if speedAngle < 0 then speedAngle = 0 elseif speedAngle > 210 then speedAngle = 210 end
 
             local baseX = (dash.dashOffset and dash.dashOffset.x) or 0
             local baseY = (dash.dashOffset and dash.dashOffset.y) or 0
 
-            local longDay  = dash.__needleLong_day
-            local longLid  = dash.__needleLong_lid
-            local shortDay = dash.__needleShort_day
-            local shortLid = dash.__needleShort_lid
+            local longDay, longLid = dash.__needleLong_day, dash.__needleLong_lid
+            local midDay, midLid = dash.__needleMid_day, dash.__needleMid_lid
+            local shortDay, shortLid = dash.__needleShort_day, dash.__needleShort_lid
+            local rpmDay, rpmLid = longDay, longLid
+            if family == "heavy" or family == "sport" then rpmDay, rpmLid = midDay or longDay, midLid or longLid end
 
-            local hasLongLid  = longLid  and longDay  and (longLid  ~= longDay)
-            local hasShortLid = shortLid and shortDay and (shortLid ~= shortDay)
+            local function drawNeedles(rpmTex, speedTex, fuelTex, voltageTex)
+                if rpmTex and dash.rpmOffset then
+                    self:DrawTextureAngle(rpmTex, baseX + dash.rpmOffset.x, baseY + dash.rpmOffset.y, rpmAngle)
+                end
+                if speedTex and dash.speedOffset then
+                    self:DrawTextureAngle(speedTex, baseX + dash.speedOffset.x, baseY + dash.speedOffset.y, speedAngle)
+                end
+                if fuelTex and dash.fuelOffset then
+                    self:DrawTextureAngle(fuelTex, baseX + dash.fuelOffset.x, baseY + dash.fuelOffset.y, fuelAngle)
+                end
+                if family ~= "standard" and voltageTex and dash.voltageOffset then
+                    self:DrawTextureAngle(voltageTex, baseX + dash.voltageOffset.x, baseY + dash.voltageOffset.y, voltageAngle)
+                end
+            end
 
             -- 1) DAY needles (static)
-            if longDay then
-                if dash.rpmOffset then
-                    self:DrawTextureAngle(longDay, baseX + dash.rpmOffset.x,   baseY + dash.rpmOffset.y,   rpmAngle)
-                end
-                if dash.speedOffset then
-                    self:DrawTextureAngle(longDay, baseX + dash.speedOffset.x, baseY + dash.speedOffset.y, speedAngle)
-                end
-            end
-            if shortDay and dash.fuelOffset then
-                self:DrawTextureAngle(shortDay, baseX + dash.fuelOffset.x, baseY + dash.fuelOffset.y, fuelAngle)
-            end
+            drawNeedles(rpmDay, longDay, shortDay, shortDay)
 
             -- 2) LID needles (lit overlay, sag + crash)
             local lidActive = (dash.__lidMode == true)
@@ -1376,17 +1623,7 @@ function ISVehicleDashboard:createChildren()
                     if self.getAlpha then oldA = self:getAlpha() elseif self.alpha then oldA = self.alpha end
                     if self.setAlpha then self:setAlpha(glow) else self.alpha = glow end
 
-                    if hasLongLid then
-                        if dash.rpmOffset then
-                            self:DrawTextureAngle(longLid, baseX + dash.rpmOffset.x,   baseY + dash.rpmOffset.y,   rpmAngle)
-                        end
-                        if dash.speedOffset then
-                            self:DrawTextureAngle(longLid, baseX + dash.speedOffset.x, baseY + dash.speedOffset.y, speedAngle)
-                        end
-                    end
-                    if hasShortLid and dash.fuelOffset then
-                        self:DrawTextureAngle(shortLid, baseX + dash.fuelOffset.x, baseY + dash.fuelOffset.y, fuelAngle)
-                    end
+                    drawNeedles(rpmLid, longLid, shortLid, shortLid)
 
                     if self.setAlpha then self:setAlpha(oldA) else self.alpha = oldA end
                 end
@@ -1406,27 +1643,45 @@ function ISVehicleDashboard:createChildren()
     if self.doorTex and self.__lock_off then
         self:_setImageTextureAndSize(self.doorTex, self.__lock_off)
         self:_setImageEnabled(self.doorTex, true, getText("Tooltip_Dashboard_LockedDoors"), ISVehicleDashboard.onClickDoors, self)
-        self:_installPressedEffect(self.doorTex, 0.96)
+        self:_installPressedEffect(self.doorTex, self.__YourDashFamily == "heavy" and 1.0 or 0.96)
     end
 
     -- Trunk button
     if self.trunkTex and self.__trunk_off then
         self:_setImageTextureAndSize(self.trunkTex, self.__trunk_off)
         self:_setImageEnabled(self.trunkTex, true, nil, ISVehicleDashboard.onClickTrunk, self)
-        self:_installPressedEffect(self.trunkTex, 0.96)
+        self:_installPressedEffect(self.trunkTex, self.__YourDashFamily == "heavy" and 1.0 or 0.96)
     end
 
     -- Lights knob (reuse lightsTex)
     if self.lightsTex and self.__light_knob then
         self:_setImageTextureAndSize(self.lightsTex, self.__light_knob)
         self:_setImageEnabled(self.lightsTex, true, getText("Tooltip_Dashboard_Headlights"), ISVehicleDashboard.onClickHeadlights, self)
+        -- Only the sport switch uses the generic press shrink.  Standard is a
+        -- rotating knob; heavy has authored OFF/ON depth textures.
+        self:_installPressedEffect(self.lightsTex, 0.96)
 
         function self.lightsTex:render()
             if not self.texture then return end
             local dash = self.target or self.parent
-            local ang = (dash and dash.__lightKnobAngle) or 0
+            local family = (dash and dash.__YourDashFamily) or "standard"
+
+            if family == "sport" then
+                local scale = ((not self.__disabled) and self.__pressed) and (self.__pressedScale or 0.96) or 1.0
+                local dw, dh = self.width * scale, self.height * scale
+                self:drawTextureScaled(self.texture,
+                    (self.width - dw) * 0.5, (self.height - dh) * 0.5,
+                    dw, dh, self.alpha or 1)
+                return
+            end
+
+            local ang = family == "heavy" and 0 or ((dash and dash.__lightKnobAngle) or 0)
             local cx = self.x + (self.width  * 0.5)
             local cy = self.y + (self.height * 0.5)
+            if family == "heavy" and dash then
+                cx = cx + (dash.__YourDashHeavyLightAlignX or 0)
+                cy = cy + (dash.__YourDashHeavyLightAlignY or 0)
+            end
             self.parent:DrawTextureAngle(self.texture, cx, cy, ang)
         end
     end
@@ -1456,15 +1711,28 @@ function ISVehicleDashboard:createChildren()
 
             local dash = self.target
             local wp = dash and dash:_getSeatWindowPart() or nil
-            if wp then
+            local family = dash and (dash.__YourDashFamily or "standard") or "standard"
+            local directional = family == "heavy" or family == "sport"
+            if dash then dash.__YourDashWindowCommand = nil end
+
+            if wp and directional then
+                local state = y < (self.height * 0.5) and "up" or "down"
+                dash.__YourDashWindowCommand = state
+                local stateTexture = state == "up" and dash.__window_switch_pull or dash.__window_switch_push
+                dash:_setImageTextureAndSize(self, stateTexture or dash.__window_switch)
+                dash:_YourDashPositionWindowState(state)
+            elseif wp then
                 local w = wp:getWindow()
                 if w and w:isOpen() then
                     dash:_setImageTextureAndSize(self, dash.__window_switch_pull)
+                    dash:_YourDashPositionWindowState("up")
                 else
                     dash:_setImageTextureAndSize(self, dash.__window_switch_push)
+                    dash:_YourDashPositionWindowState("down")
                 end
             else
                 dash:_setImageTextureAndSize(self, dash.__window_switch)
+                dash:_YourDashPositionWindowState("neutral")
             end
 
             if _down then return _down(self, x, y) end
@@ -1477,10 +1745,16 @@ function ISVehicleDashboard:createChildren()
             local dash = self.target
             if dash and dash.__window_switch then
                 dash:_setImageTextureAndSize(self, dash.__window_switch)
+                dash:_YourDashPositionWindowState("neutral")
             end
-            if self.__disabled then return false end
-            if _up then return _up(self, x, y) end
-            return true
+            if self.__disabled then
+                if dash then dash.__YourDashWindowCommand = nil end
+                return false
+            end
+            local result = true
+            if _up then result = _up(self, x, y) end
+            if dash then dash.__YourDashWindowCommand = nil end
+            return result
         end
 
         local _upOut = self.windowTex.onMouseUpOutside
@@ -1489,7 +1763,9 @@ function ISVehicleDashboard:createChildren()
             local dash = self.target
             if dash and dash.__window_switch then
                 dash:_setImageTextureAndSize(self, dash.__window_switch)
+                dash:_YourDashPositionWindowState("neutral")
             end
+            if dash then dash.__YourDashWindowCommand = nil end
             if _upOut then return _upOut(self, x, y) end
             return true
         end
@@ -1500,13 +1776,22 @@ function ISVehicleDashboard:createChildren()
         self.backgroundTex.__YourDashBgStacked = true
         self.backgroundTex.target = self -- so render can read dash state/tex
         function self.backgroundTex:render()
-            if not self.texture then return end
             local dash = self.target or self.parent
 
             local w, h = self.width, self.height
 
-            -- base cluster (printed) never flashes
-            self:drawTextureScaled(self.texture, 0, 0, w, h, (self.alpha or 1))
+            local function drawCenteredTop(tex, alpha)
+                if not tex then return end
+                local tw = tex:getWidthOrig()
+                self:drawTexture(tex, math.floor((w - tw) * 0.5), 0, alpha or 1)
+            end
+
+            -- New masked artwork order: base dash -> printed/lit ticks -> shadow.
+            drawCenteredTop(dash and dash.__dashTex, self.alpha or 1)
+
+            if self.texture then
+                self:drawTextureScaled(self.texture, 0, 0, w, h, self.alpha or 1)
+            end
 
             -- lid/backlight layer flashes + cranking-dims
             local lidTex = dash and dash.__bg_lid or nil
@@ -1519,34 +1804,15 @@ function ISVehicleDashboard:createChildren()
                 local impact = (dash and dash.__impactDimAlpha) or 1.0
                 self:drawTextureScaled(lidTex, 0, 0, w, h, lidAlpha * elec * impact)
             end
---[[
-
-            -- cracks layer (never flashes)  [BELOW stain]
-            local crackTex = dash and dash.__crackTex or nil
-            if crackTex and wearA > 0 then
-                self:drawTextureScaled(crackTex, 0, 0, w, h, (self.alpha or 1) * wearA)
-            end
-
-            -- stain layer (never flashes)
-            local stainTex = dash and dash.__stainTex or nil
-            if stainTex and wearA > 0 then
-                self:drawTextureScaled(stainTex, 0, 0, w, h, (self.alpha or 1) * wearA)
-            end
-
-
-            -- dash overlay (glass/texture) never flashes
-            local dashTex = dash and dash.__dashTex or nil
-            if dashTex then
-                self:drawTextureScaled(dashTex, 0, 0, w, h, (self.alpha or 1))
-            end
-            ]]
+            drawCenteredTop(dash and dash.__dashShadowTex, self.alpha or 1)
         end
 
     end
 
     self:_YourDashEnsureGlassOverlay()
+    self:_YourDashEnsureStateLEDs()
     self:_YourDashPositionGlassOverlay()
-    self:_YourDashBringControlsAboveGlass()
+    self:_YourDashFinalizeWearOrder()
 
     self:onResolutionChange()
 end
@@ -1556,12 +1822,51 @@ end
 -- =========================
 local _oldSetVehicle = ISVehicleDashboard.setVehicle
 function ISVehicleDashboard:setVehicle(vehicle)
+    local previousVehicle = self.vehicle
     _oldSetVehicle(self, vehicle)
+
+    if previousVehicle ~= vehicle then
+        self.__YourDashSmoothMPH, self.__YourDashSmoothMPHVel = 0.0, 0.0
+        self.__YourDashBatterySampleCharge = nil
+        self.__YourDashBatterySampleAge = nil
+        self.__YourDashMeasuredDrop = nil
+        self.__YourDashVoltage, self.__YourDashVoltageVel = nil, nil
+        self.__YourDashLoadSampleT, self.__YourDashLoadUnits = nil, nil
+        self.__YourDashHeadlightSwitchOn = vehicle and vehicle:getHeadlightsOn() == true or false
+        self.__YourDashHeadlightSwitchPending = 0
+        self.__YourDashWindowCommand = nil
+        self.__YourDashCranking = false
+        self.__YourDashCrankSagActive = false
+        self.__YourDashCrankKick01 = 0
+        self.__YourDashCrankDimTarget = 1
+        self.__crankDimDelayT, self.__crankDimPrev, self.__crankSagPrev = 0, false, false
+        self.__crankKickT, self.__crankKickActive = 0, false
+        self.__crankBattFlickerT, self.__crankBattFlickerActive = 0, false
+        self.__elecDimAlpha = 1
+        self.__warnChkState, self.__warnChkT = 0, 0
+        self.__warnChkRelease, self.__warnChkPrevCranking = nil, false
+        self.__stainTex, self.__stainLevel, self.__stainVariant, self.__stainSeatCond = nil, nil, nil, nil
+        self.__crackTex, self.__crackLevel, self.__windshieldCond = nil, nil, nil
+        self.__YourDashRetainedStainLevel, self.__YourDashRetainedStainVariant = nil, nil
+    end
 
     if not vehicle then
         self.rpmValue, self.rpmVel = 0.0, 0.0
         self.speedValue, self.speedVel = 0.0, 0.0
+        self.__YourDashSmoothMPH, self.__YourDashSmoothMPHVel = 0.0, 0.0
+        self.__YourDashBatterySampleCharge = nil
+        self.__YourDashBatterySampleAge = nil
+        self.__YourDashMeasuredDrop = nil
         return
+    end
+
+    local profile = YourDash.GetVehicleProfile and YourDash.GetVehicleProfile(vehicle) or nil
+    local family = profile and (profile.family or profile[1]) or "standard"
+    local accent = profile and (profile.accent or profile[2]) or "base"
+    if self.__YourDashFamily ~= family or self.__YourDashAccent ~= accent then
+        self.__YourDashFamily = family
+        self.__YourDashAccent = accent
+        self:_YourDashApplyTextureSet(false, false)
     end
 
     if self.fuelGauge then self.fuelGauge:setVisible(false) end
@@ -1575,13 +1880,28 @@ end
 local _oldPrerender = ISVehicleDashboard.prerender
 function ISVehicleDashboard:prerender()
     if not self.vehicle or not ISUIHandler.allUIVisible then return end
-    -- Hot-swap texture pack if the option changed
-    local wantLarge = YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures() or false
-    if self.__YourDashLarge ~= wantLarge then
-        self:_YourDashApplyTextureSet(wantLarge, false)
+    -- Script identity may change in place for debug-respawned vehicles.  Core
+    -- validates its cache identity; re-read the lightweight profile each frame
+    -- so this dashboard can swap family/accent without a new vehicle object.
+    if YourDash.GetVehicleProfile then
+        local profile = YourDash.GetVehicleProfile(self.vehicle)
+        local family = profile and (profile.family or profile[1]) or "standard"
+        local accent = profile and (profile.accent or profile[2]) or "base"
+        if family ~= self.__YourDashFamily or accent ~= self.__YourDashAccent then
+            self.__YourDashFamily, self.__YourDashAccent = family, accent
+            self:_YourDashApplyTextureSet(false, false)
+        end
+    end
+    -- Hot-swap when size, family, or sports accent changes.
+    local scaleKey = YourDash.GetScaleKey and YourDash.GetScaleKey() or "1x"
+    local wantedTextureKey = (self.__YourDashFamily or "standard") .. ":" ..
+        (self.__YourDashAccent or "base") .. ":" .. scaleKey
+    if self.__YourDashTextureKey ~= wantedTextureKey then
+        self:_YourDashApplyTextureSet(scaleKey == "2x", false)
     end
 
     _oldPrerender(self)
+    self:_YourDashScaleIgnition()
 
     local hasPower = self:_hasBatteryPower()
     local lidOn = self.vehicle:getHeadlightsOn() and hasPower
@@ -1590,13 +1910,26 @@ function ISVehicleDashboard:prerender()
 
     local engineSpeedValue = 0.0
     local speedValue = 0.0
+    self.__YourDashRPM = 0
+    self.__YourDashSpeedMPH = 0
     if self.vehicle:isEngineRunning() then
-        engineSpeedValue = math.max(0, math.min(1, (self.vehicle:getEngineSpeed() - 0) / (7000 - 0)))
-        speedValue       = math.max(0, math.min(1, math.abs(self.vehicle:getCurrentSpeedKmHour()) / 120))
+        self.__YourDashRPM = math.max(0, self.vehicle:getEngineSpeed() or 0)
+        local speedKph = math.abs(self.vehicle:getCurrentSpeedKmHour() or 0)
+        self.__YourDashSpeedMPH = speedKph * 0.621371192237
+        engineSpeedValue = math.max(0, math.min(1, self.__YourDashRPM / 7000))
+        speedValue = math.max(0, math.min(1, speedKph / 120))
     end
 
     local dt = UIManager.getSecondsSinceLastRender()
     if not dt or dt <= 0 then dt = 1/30 end
+    if (self.__YourDashHeadlightSwitchPending or 0) > 0 then
+        self.__YourDashHeadlightSwitchPending = math.max(0,
+            self.__YourDashHeadlightSwitchPending - math.min(dt, 0.25))
+    end
+
+    local cranking = self:_YourDashIsCranking()
+    self:_YourDashUpdateCrankEnvelope(cranking, dt)
+    self:_YourDashUpdateVoltage(dt, cranking)
 
     self:_updateStainLayer()
     self:_updateCrackLayer()
@@ -1628,30 +1961,41 @@ function ISVehicleDashboard:prerender()
 
     self.__impactDimAlpha = self._ease(self.__impactDimAlpha, impactTarget, self.CRASH_DIM_SMOOTH_TIME, dt)
 
+    local needleResponse = self:_YourDashNeedleResponse()
+    local needleSmoothUp = needleResponse.up or self.NEEDLE_SMOOTHTIME_UP
+    local needleSmoothDown = needleResponse.down or self.NEEDLE_SMOOTHTIME_DOWN
+
     self.rpmValue = (self.rpmValue == nil) and engineSpeedValue or self.rpmValue
     self.rpmVel   = self.rpmVel or 0.0
-    local st = (engineSpeedValue > self.rpmValue) and self.NEEDLE_SMOOTHTIME_UP or self.NEEDLE_SMOOTHTIME_DOWN
+    local st = (engineSpeedValue > self.rpmValue) and needleSmoothUp or needleSmoothDown
     self.rpmValue, self.rpmVel = self._smoothDamp(self.rpmValue, engineSpeedValue, self.rpmVel, st, self.NEEDLE_MAXSPEED, dt)
 
     self.speedValue = (self.speedValue == nil) and speedValue or self.speedValue
     self.speedVel   = self.speedVel or 0.0
-    local st2 = (speedValue > self.speedValue) and self.NEEDLE_SMOOTHTIME_UP or self.NEEDLE_SMOOTHTIME_DOWN
+    local st2 = (speedValue > self.speedValue) and needleSmoothUp or needleSmoothDown
     self.speedValue, self.speedVel = self._smoothDamp(self.speedValue, speedValue, self.speedVel, st2, self.NEEDLE_MAXSPEED, dt)
+
+    local targetMph = self.__YourDashSpeedMPH or 0
+    self.__YourDashSmoothMPH = self.__YourDashSmoothMPH or targetMph
+    self.__YourDashSmoothMPHVel = self.__YourDashSmoothMPHVel or 0
+    local mphSmooth = (targetMph > self.__YourDashSmoothMPH) and needleSmoothUp or needleSmoothDown
+    self.__YourDashSmoothMPH, self.__YourDashSmoothMPHVel = self._smoothDamp(
+        self.__YourDashSmoothMPH, targetMph, self.__YourDashSmoothMPHVel,
+        mphSmooth, self.NEEDLE_MAXSPEED, dt)
 
 
     -- Door icon (don't swap when no power)
     if self.doorTex and self.__lock_off then
+        local doorTexture = self.__lock_off
         if hasPower then
             if self.vehicle:areAllDoorsLocked() then
-                self.doorTex.texture = self.__lock_on
+                doorTexture = self.__lock_on
             elseif self.vehicle:isAnyDoorLocked() then
-                self.doorTex.texture = self.__lock_partial
-            else
-                self.doorTex.texture = self.__lock_off
+                doorTexture = self.__lock_partial
             end
-        else
-            -- Freeze to unpowered/unlid look
-            self.doorTex.texture = self.__lock_off
+        end
+        if doorTexture and self.doorTex.texture ~= doorTexture then
+            self:_setImageTextureAndSize(self.doorTex, doorTexture)
         end
         self.doorTex.backgroundColor = { r=0, g=0, b=0, a=0 }
     end
@@ -1662,7 +2006,7 @@ function ISVehicleDashboard:prerender()
         self.trunkTex:setVisible(true)
 
         if not hasTrunk then
-            self.trunkTex.texture = self.__blank_btn
+            self:_setImageTextureAndSize(self.trunkTex, self.__blank_btn)
             self.trunkTex.onclick = nil
             self.trunkTex.mouseovertext = nil
             self.trunkTex.__disabled = true
@@ -1691,9 +2035,52 @@ function ISVehicleDashboard:prerender()
         end
     end
 
+    local function setStateLED(img, texture)
+        if not img then return end
+        if texture and img.texture ~= texture then self:_setImageTextureAndSize(img, texture) end
+        img:setVisible(texture ~= nil)
+    end
+    if self.__led_off then
+        local doorLED = self.__led_off
+        if hasPower then
+            if self.vehicle:areAllDoorsLocked() then doorLED = self.__led_on
+            elseif self.vehicle:isAnyDoorLocked() then doorLED = self.__led_partial or self.__led_off end
+        end
+        local trunkLED = self.__led_off
+        if hasPower and self.vehicle:getPartById("TruckBed") and self.vehicle:isTrunkLocked() then
+            trunkLED = self.__led_on
+        end
+        setStateLED(self.__YourDashDoorLED, doorLED)
+        setStateLED(self.__YourDashTrunkLED, trunkLED)
+    else
+        setStateLED(self.__YourDashDoorLED, nil)
+        setStateLED(self.__YourDashTrunkLED, nil)
+    end
+
 
     -- Lights knob angle + untint
-    self.__lightKnobAngle = (self.vehicle and self.vehicle:getHeadlightsOn()) and 0 or -90
+    local lightSwitchOn = self:_YourDashGetHeadlightSwitchState()
+    if self.__YourDashFamily == "heavy" and self.lightsTex then
+        local t = lightSwitchOn and self.__light_knob_on or self.__light_knob_off
+        if t and self.lightsTex.texture ~= t then self:_setImageTextureAndSize(self.lightsTex, t) end
+        -- Measured from the hollow circular base rather than the pressed
+        -- artwork's outer shadow.  The logical-ON (*_off filename) export is
+        -- left-shifted by 1/2/3/4 px across the four authored scales.
+        local scaleKey = YourDash.GetScaleKey and YourDash.GetScaleKey() or "1x"
+        self.__YourDashHeavyLightAlignX = lightSwitchOn and (HEAVY_LIGHT_ALIGN_X[scaleKey] or 0) or 0
+        self.__YourDashHeavyLightAlignY = 0
+        self.__lightKnobAngle = 0
+    elseif self.__YourDashFamily == "standard" then
+        -- The redesigned standard texture is already authored 90 degrees from
+        -- the legacy knob.  Use its new baseline instead of applying the old
+        -- rotation a second time.
+        self.__lightKnobAngle = lightSwitchOn and 90 or 0
+    else
+        -- Sport is a simple momentary-looking switch: it has no persistent
+        -- indicator or rotation, only the press shrink installed above.
+        self.__lightKnobAngle = 0
+        self.__YourDashHeavyLightAlignX, self.__YourDashHeavyLightAlignY = 0, 0
+    end
     if self.lightsTex then
         self.lightsTex.backgroundColor = { r=0, g=0, b=0, a=0 }
     end
@@ -1724,6 +2111,7 @@ function ISVehicleDashboard:prerender()
             if self.windowTex.texture ~= self.__window_switch then
                 self:_setImageTextureAndSize(self.windowTex, self.__window_switch)
             end
+            self:_YourDashPositionWindowState("neutral")
         end
     end
 
@@ -1741,7 +2129,8 @@ function ISVehicleDashboard:prerender()
 
             -- Gear label only when dash is "on": battery power + key inserted OR hotwired
             if self.btn_partSpeed then
-                local showGear = hasPower and (keysInIgnition or (hotwired and engineRunning))
+                local showGear = self.__YourDashFamily ~= "sport" and hasPower and
+                    (keysInIgnition or (hotwired and engineRunning))
                 self.btn_partSpeed:setVisible(showGear)
                 if not showGear then
                     -- extra insurance: even if something forces visible, there's nothing to draw
@@ -1749,91 +2138,11 @@ function ISVehicleDashboard:prerender()
                 end
             end
 
-            -- Detect "cranking"
-            local cranking = false
-            if v.isStarting and v:isStarting() then
-                cranking = true
-            elseif v.isEngineStarted and v:isEngineStarted() and (not engineRunning) then
-                -- fallback (some builds use this state name)
-                cranking = true
-            end
-
-            -- Voltage sag dimmer during cranking (smooth + delayed start + starter kick dip)
+            -- The starter phase was advanced once before voltage sampling so
+            -- warning bulbs and the voltage needle consume the same envelope.
+            local cranking = self.__YourDashCranking == true
+            local dimTarget = self.__YourDashCrankDimTarget or 1.0
             self.__elecDimAlpha = self.__elecDimAlpha or 1.0
-            self.__crankDimDelayT = self.__crankDimDelayT or 0
-            self.__crankDimPrev = self.__crankDimPrev or false
-
-            if cranking then
-                if not self.__crankDimPrev then
-                    self.__crankDimDelayT = 0
-                end
-                self.__crankDimDelayT = self.__crankDimDelayT + dt
-            else
-                self.__crankDimDelayT = 0
-            end
-            self.__crankDimPrev = cranking
-
-            -- “Sag active” starts after your delay (so the kick won’t expire during the delay)
-            self.__crankSagPrev = self.__crankSagPrev or false
-            local sagActive = cranking and (self.__crankDimDelayT >= self.CRANK_DIM_DELAY)
-
-            -- Kick starts exactly when sag becomes active
-            if sagActive and (not self.__crankSagPrev) then
-                self.__crankKickT = 0
-                self.__crankKickActive = true
-
-                self.__crankBattFlickerActive = true
-                self.__crankBattFlickerT = 0
-            end
-            if self.__crankBattFlickerActive then
-                self.__crankBattFlickerT = (self.__crankBattFlickerT or 0) + dt
-                if self.__crankBattFlickerT >= (self.CRANK_BATT_FLICKER_TIME or 0) then
-                    self.__crankBattFlickerActive = false
-                end
-            end
-
-            -- reset when cranking ends
-            if not cranking then
-                self.__crankBattFlickerActive = false
-                self.__crankBattFlickerT = 0
-            end
-
-            if not cranking then
-                self.__crankKickActive = false
-                self.__crankKickT = 0
-            end
-            self.__crankSagPrev = sagActive
-
-            local dimTarget = 1.0
-            if sagActive then
-                local baseAlpha = self:_getCrankDimAlphaFromCharge()
-
-                -- Kick envelope: hold at (base - amount), then smooth ramp back to base
-                local kick = 0.0
-                if self.__crankKickActive then
-                    self.__crankKickT = (self.__crankKickT or 0) + dt
-
-                    local amt  = self.CRANK_KICK_AMOUNT  or 0.15
-                    local hold = self.CRANK_KICK_HOLD    or 0.05
-                    local rec  = self.CRANK_KICK_RECOVER or 0.18
-
-                    if self.__crankKickT <= hold then
-                        kick = amt
-                    elseif rec > 0 and self.__crankKickT <= (hold + rec) then
-                        local u = (self.__crankKickT - hold) / rec -- 0..1
-                        if u < 0 then u = 0 elseif u > 1 then u = 1 end
-                        -- smoothstep for a nicer ramp
-                        local s = u*u*(3 - 2*u)
-                        kick = amt * (1 - s)
-                    else
-                        self.__crankKickActive = false
-                        kick = 0.0
-                    end
-                end
-
-                dimTarget = baseAlpha - kick
-                if dimTarget < 0 then dimTarget = 0 end
-            end
 
             -- Faster when dropping, slower when recovering (more “realistic” starter dip)
             local smoothTime = (dimTarget < (self.__elecDimAlpha or 1.0)) and (self.CRANK_DIM_TIME_DOWN or self.CRANK_DIM_TIME)
@@ -1906,18 +2215,22 @@ function ISVehicleDashboard:prerender()
                         self.__warnChkState = 2
                         self.__warnChkT = 0
 
-                        -- per your timing spec (staggered, not same time)
+                        -- Preserve the stagger order while scaling how long
+                        -- incandescent bulb-check glow persists per cluster.
+                        local warningResponse = self:_YourDashWarningResponse()
+                        local persistence = warningResponse.bulbPersistence or 1.0
+                        local function release(seconds) return seconds * persistence end
                         self.__warnChkRelease = {
-                            light   = 0.5,  -- headlights indicator
-                            door    = 0.5,  -- door indicator
+                            light   = release(0.5),  -- headlights indicator
+                            door    = release(0.5),  -- door indicator
 
-                            brake   = 0.5,
-                            stop    = 1.25,
-                            check   = 1.5,
-                            battery = 1.5,
-                            cruise  = 0.5,
+                            brake   = release(0.5),
+                            stop    = release(1.25),
+                            check   = release(1.5),
+                            battery = release(1.5),
+                            cruise  = release(0.5),
 
-                            fuel    = 0.5,
+                            fuel    = release(0.5),
                         }
                     elseif not cranking then
                         -- Cranking ended but engine didn't start -> abort immediately
@@ -2001,8 +2314,9 @@ function ISVehicleDashboard:prerender()
                     local target = (phase == 0) and 1.0 or (self.WARN_STOP_BLINK_DIM or 0)
 
                     self.__warnStopBlink = self.__warnStopBlink or target
-                    local fadeTime = (target > self.__warnStopBlink) and (self.WARN_FADE_IN_TIME or 0.05)
-                                                            or (self.WARN_FADE_OUT_TIME or 0.10)
+                    local warningResponse = self:_YourDashWarningResponse()
+                    local fadeTime = (target > self.__warnStopBlink) and warningResponse.fadeIn
+                                                            or warningResponse.fadeOut
                     self.__warnStopBlink = self._ease(self.__warnStopBlink, target, fadeTime, (dt or 1/30))
 
                     stopAlpha = self.__warnStopBlink
@@ -2082,56 +2396,41 @@ function ISVehicleDashboard:onResolutionChange()
     _oldOnRes(self)
     if not self.backgroundTex then return end
 
-    local useLarge = YourDash and YourDash.UseLargeTextures and YourDash.UseLargeTextures() or false
-    local function pick(a, b) return useLarge and b or a end
+    local layout = YourDash.GetLayout and YourDash.GetLayout(self) or nil
+    local controls = layout and layout.controls or {}
+    local warnings = layout and layout.warnings or {}
+    local scale = YourDash.GetScale and YourDash.GetScale() or 1
+    local useLarge = scale >= 1.4
+    local function pos(section, name, fallbackX, fallbackY)
+        local p = section and section[name] or nil
+        local x = p and (p.x or p[1]) or fallbackX
+        local y = p and (p.y or p[2]) or fallbackY
+        return math.floor((x or 0) * scale + 0.5), math.floor((y or 0) * scale + 0.5)
+    end
 
-    local SPEEDREG_X = pick(self.CTRL_SPEEDREG_X, self.CTRL_SPEEDREG_X_LARGE)
-    local SPEEDREG_Y = pick(self.CTRL_SPEEDREG_Y, self.CTRL_SPEEDREG_Y_LARGE)
+    local SPEEDREG_X, SPEEDREG_Y = pos(controls, "speedreg", self.CTRL_SPEEDREG_X, self.CTRL_SPEEDREG_Y)
+    local GEAR_X, GEAR_Y = pos(controls, "gear", self.CTRL_GEAR_X, self.CTRL_GEAR_Y)
+    local ENGINE_X, ENGINE_Y = pos(controls, "engine", self.CTRL_ENGINE_X, self.CTRL_ENGINE_Y)
+    local BATTERY_X, BATTERY_Y = pos(controls, "battery", self.CTRL_BATTERY_X, self.CTRL_BATTERY_Y)
+    local LIGHTS_X, LIGHTS_Y = pos(controls, "lights", self.CTRL_LIGHTS_X, self.CTRL_LIGHTS_Y)
+    local IGNITION_X, IGNITION_Y = pos(controls, "ignition", self.CTRL_IGNITION_X, self.CTRL_IGNITION_Y)
+    local FUEL_X, FUEL_Y = pos(controls, "fuelArrow", self.CTRL_FUEL_ARROW_X, self.CTRL_FUEL_ARROW_Y)
+    local FUEL_L_X, FUEL_L_Y = pos(controls, "fuelArrowLeft", FUEL_X / scale, FUEL_Y / scale)
+    local FUEL_R_X, FUEL_R_Y = pos(controls, "fuelArrowRight", FUEL_X / scale, FUEL_Y / scale)
+    local DOOR_X, DOOR_Y = pos(controls, "door", self.CTRL_DOOR_X, self.CTRL_DOOR_Y)
+    local TRUNK_X, TRUNK_Y = pos(controls, "trunk", self.CTRL_TRUNK_X, self.CTRL_TRUNK_Y)
+    local DOOR_LED_X, DOOR_LED_Y = pos(controls, "doorLED", DOOR_X / scale, DOOR_Y / scale)
+    local TRUNK_LED_X, TRUNK_LED_Y = pos(controls, "trunkLED", TRUNK_X / scale, TRUNK_Y / scale)
+    local WINDOW_X, WINDOW_Y = pos(controls, "window", self.CTRL_WINDOW_X, self.CTRL_WINDOW_Y)
 
-    local GEAR_X = pick(self.CTRL_GEAR_X, self.CTRL_GEAR_X_LARGE)
-    local GEAR_Y = pick(self.CTRL_GEAR_Y, self.CTRL_GEAR_Y_LARGE)
-
-    local ENGINE_X = pick(self.CTRL_ENGINE_X, self.CTRL_ENGINE_X_LARGE)
-    local ENGINE_Y = pick(self.CTRL_ENGINE_Y, self.CTRL_ENGINE_Y_LARGE)
-
-    local BATTERY_X = pick(self.CTRL_BATTERY_X, self.CTRL_BATTERY_X_LARGE)
-    local BATTERY_Y = pick(self.CTRL_BATTERY_Y, self.CTRL_BATTERY_Y_LARGE)
-
-    local LIGHTS_X = pick(self.CTRL_LIGHTS_X, self.CTRL_LIGHTS_X_LARGE)
-    local LIGHTS_Y = pick(self.CTRL_LIGHTS_Y, self.CTRL_LIGHTS_Y_LARGE)
-
-    local IGNITION_X = pick(self.CTRL_IGNITION_X, self.CTRL_IGNITION_X_LARGE)
-    local IGNITION_Y = pick(self.CTRL_IGNITION_Y, self.CTRL_IGNITION_Y_LARGE)
-
-    local FUEL_X = pick(self.CTRL_FUEL_ARROW_X, self.CTRL_FUEL_ARROW_X_LARGE)
-    local FUEL_Y = pick(self.CTRL_FUEL_ARROW_Y, self.CTRL_FUEL_ARROW_Y_LARGE)
-
-    local DOOR_X = pick(self.CTRL_DOOR_X, self.CTRL_DOOR_X_LARGE)
-    local DOOR_Y = pick(self.CTRL_DOOR_Y, self.CTRL_DOOR_Y_LARGE)
-
-    local TRUNK_X = pick(self.CTRL_TRUNK_X, self.CTRL_TRUNK_X_LARGE)
-    local TRUNK_Y = pick(self.CTRL_TRUNK_Y, self.CTRL_TRUNK_Y_LARGE)
-
-    local WINDOW_X = pick(self.CTRL_WINDOW_X, self.CTRL_WINDOW_X_LARGE)
-    local WINDOW_Y = pick(self.CTRL_WINDOW_Y, self.CTRL_WINDOW_Y_LARGE)
-
-    -- Warning positions
-    local WCX = pick(self.WARN_CRUISE_X,  self.WARN_CRUISE_X_LARGE)
-    local WCY = pick(self.WARN_CRUISE_Y,  self.WARN_CRUISE_Y_LARGE)
-    local WBX = pick(self.WARN_BATTERY_X, self.WARN_BATTERY_X_LARGE)
-    local WBY = pick(self.WARN_BATTERY_Y, self.WARN_BATTERY_Y_LARGE)
-    local WRX = pick(self.WARN_BRAKE_X,   self.WARN_BRAKE_X_LARGE)
-    local WRY = pick(self.WARN_BRAKE_Y,   self.WARN_BRAKE_Y_LARGE)
-    local WKX = pick(self.WARN_CHECK_X,   self.WARN_CHECK_X_LARGE)
-    local WKY = pick(self.WARN_CHECK_Y,   self.WARN_CHECK_Y_LARGE)
-    local WSX = pick(self.WARN_STOP_X,    self.WARN_STOP_X_LARGE)
-    local WSY = pick(self.WARN_STOP_Y,    self.WARN_STOP_Y_LARGE)
-    local WDX = pick(self.WARN_DOOR_X,    self.WARN_DOOR_X_LARGE)
-    local WDY = pick(self.WARN_DOOR_Y,    self.WARN_DOOR_Y_LARGE)
-    local WFX = pick(self.WARN_FUEL_X,    self.WARN_FUEL_X_LARGE)
-    local WFY = pick(self.WARN_FUEL_Y,    self.WARN_FUEL_Y_LARGE)
-    local WLX = pick(self.WARN_LIGHT_X,   self.WARN_LIGHT_X_LARGE)
-    local WLY = pick(self.WARN_LIGHT_Y,   self.WARN_LIGHT_Y_LARGE)
+    local WCX, WCY = pos(warnings, "cruise", self.WARN_CRUISE_X, self.WARN_CRUISE_Y)
+    local WBX, WBY = pos(warnings, "battery", self.WARN_BATTERY_X, self.WARN_BATTERY_Y)
+    local WRX, WRY = pos(warnings, "brake", self.WARN_BRAKE_X, self.WARN_BRAKE_Y)
+    local WKX, WKY = pos(warnings, "check", self.WARN_CHECK_X, self.WARN_CHECK_Y)
+    local WSX, WSY = pos(warnings, "stop", self.WARN_STOP_X, self.WARN_STOP_Y)
+    local WDX, WDY = pos(warnings, "door", self.WARN_DOOR_X, self.WARN_DOOR_Y)
+    local WFX, WFY = pos(warnings, "fuel", self.WARN_FUEL_X, self.WARN_FUEL_Y)
+    local WLX, WLY = pos(warnings, "light", self.WARN_LIGHT_X, self.WARN_LIGHT_Y)
 
 
     if self.speedregulatorTex then
@@ -2157,23 +2456,24 @@ function ISVehicleDashboard:onResolutionChange()
     if self.ignitionTex then
         self.ignitionTex:setX(self.backgroundTex:getX() + IGNITION_X)
         self.ignitionTex:setY(self.backgroundTex:getY() + IGNITION_Y)
+        self:_YourDashScaleIgnition()
     end
 
     if self.leftSideFuel then
-        self.leftSideFuel:setX(self.backgroundTex:getX() + FUEL_X)
-        self.leftSideFuel:setY(self.backgroundTex:getY() + FUEL_Y)
+        self.leftSideFuel:setX(self.backgroundTex:getX() + FUEL_L_X)
+        self.leftSideFuel:setY(self.backgroundTex:getY() + FUEL_L_Y)
     end
     if self.rightSideFuel then
-        self.rightSideFuel:setX(self.backgroundTex:getX() + FUEL_X)
-        self.rightSideFuel:setY(self.backgroundTex:getY() + FUEL_Y)
+        self.rightSideFuel:setX(self.backgroundTex:getX() + FUEL_R_X)
+        self.rightSideFuel:setY(self.backgroundTex:getY() + FUEL_R_Y)
     end
     if self.leftSideFuelLid then
-        self.leftSideFuelLid:setX(self.backgroundTex:getX() + FUEL_X)
-        self.leftSideFuelLid:setY(self.backgroundTex:getY() + FUEL_Y)
+        self.leftSideFuelLid:setX(self.backgroundTex:getX() + FUEL_L_X)
+        self.leftSideFuelLid:setY(self.backgroundTex:getY() + FUEL_L_Y)
     end
     if self.rightSideFuelLid then
-        self.rightSideFuelLid:setX(self.backgroundTex:getX() + FUEL_X)
-        self.rightSideFuelLid:setY(self.backgroundTex:getY() + FUEL_Y)
+        self.rightSideFuelLid:setX(self.backgroundTex:getX() + FUEL_R_X)
+        self.rightSideFuelLid:setY(self.backgroundTex:getY() + FUEL_R_Y)
     end
 
     if self.doorTex then
@@ -2188,13 +2488,21 @@ function ISVehicleDashboard:onResolutionChange()
         self.windowTex:setX(self.backgroundTex:getX() + WINDOW_X)
         self.windowTex:setY(self.backgroundTex:getY() + WINDOW_Y)
     end
+    if self.__YourDashDoorLED then
+        self.__YourDashDoorLED:setX(self.backgroundTex:getX() + DOOR_LED_X)
+        self.__YourDashDoorLED:setY(self.backgroundTex:getY() + DOOR_LED_Y)
+    end
+    if self.__YourDashTrunkLED then
+        self.__YourDashTrunkLED:setX(self.backgroundTex:getX() + TRUNK_LED_X)
+        self.__YourDashTrunkLED:setY(self.backgroundTex:getY() + TRUNK_LED_Y)
+    end
 
 
     -- Warning lights positions
     if self.backgroundTex then
         local bx = self.backgroundTex:getX()
         local by = self.backgroundTex:getY()
-        
+
         if self.warnCruiseTex then
             self.warnCruiseTex:setX(bx + WCX)
             self.warnCruiseTex:setY(by + WCY)
@@ -2236,7 +2544,7 @@ function ISVehicleDashboard:onResolutionChange()
             self.__YourDashNeedleLayer:setHeight(self.backgroundTex:getHeight())
         end
         if self._YourDashPositionGlassOverlay then self:_YourDashPositionGlassOverlay() end
-        if self._YourDashBringControlsAboveGlass then self:_YourDashBringControlsAboveGlass() end
+        if self._YourDashFinalizeWearOrder then self:_YourDashFinalizeWearOrder() end
     end
     self:_YourDashApplyGearFont(useLarge)
 
