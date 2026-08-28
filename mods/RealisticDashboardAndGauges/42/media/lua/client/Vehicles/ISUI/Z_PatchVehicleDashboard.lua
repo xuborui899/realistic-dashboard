@@ -4,6 +4,7 @@ if isServer() then return end
 -- Load vanilla
 require "Vehicles/ISUI/ISVehicleDashboard"
 require "Vehicles/ISUI/ISVehiclePartMenu"
+require "Vehicles/ISUI/ISVehicleMenu"
 require "ISUI/ISPanel"
 require "YourDash/DashboardCore"
 
@@ -25,7 +26,111 @@ local function YourDash_SetMouseTransparent(element)
     end
 end
 
+local function YourDash_ButtonTexture(name)
+    if not name or not getTexture then return nil end
+    local scaleKey = YourDash.GetScaleKey and YourDash.GetScaleKey() or "1x"
+    local ok, texture = pcall(getTexture, string.format("media/ui/vehicles/buttons/%s/%s", scaleKey, name))
+    if ok then return texture end
+    return nil
+end
+
+local function YourDash_Text(key, fallback)
+    if getText then
+        local ok, text = pcall(getText, key)
+        if ok and text and text ~= key then return text end
+    end
+    return fallback or key
+end
+
+local function YourDash_IsMouseOver(element)
+    if not element or not element.isMouseOver then return false end
+    local ok, value = pcall(element.isMouseOver, element)
+    return ok and value == true
+end
+
+local function YourDash_UpdateHoverAlpha(element)
+    if not element then return end
+    element.alpha = YourDash_IsMouseOver(element) and 1.0 or 0.5
+end
+
+local function YourDash_IsSeatInstalled(vehicle, seat)
+    if not vehicle or seat == nil then return false end
+    if vehicle.isSeatInstalled then
+        local ok, installed = pcall(vehicle.isSeatInstalled, vehicle, seat)
+        if ok then return installed == true end
+    end
+    if vehicle.getPartForSeatContainer then
+        local ok, part = pcall(vehicle.getPartForSeatContainer, vehicle, seat)
+        return ok and part ~= nil
+    end
+    return false
+end
+
+local function YourDash_ServerBool(name, default)
+    if not isClient or not isClient() then return default end
+    local options = getServerOptions and getServerOptions() or nil
+    if options and options.getBoolean then
+        local ok, value = pcall(options.getBoolean, options, name)
+        if ok then return value == true end
+    end
+    return default
+end
+
+local function YourDash_CanSleepInVehicle(playerObj, vehicle)
+    if not playerObj or not vehicle then return false, YourDash_Text("ContextMenu_Sleep", "sleep") end
+    if isClient and isClient() and not YourDash_ServerBool("SleepAllowed", false) then
+        return false, YourDash_Text("ContextMenu_Sleep", "sleep")
+    end
+
+    local sleepNeeded = (not isClient or not isClient()) or YourDash_ServerBool("SleepNeeded", false)
+    local stats = playerObj.getStats and playerObj:getStats() or nil
+    if sleepNeeded and stats and stats.get and CharacterStat and CharacterStat.FATIGUE and
+            stats:get(CharacterStat.FATIGUE) <= 0.3 then
+        return false, YourDash_Text("IGUI_Sleep_NotTiredEnough", "not tired enough")
+    end
+
+    if vehicle.isStopped and not vehicle:isStopped() then
+        return false, YourDash_Text("IGUI_PlayerText_CanNotSleepInMovingCar", "cannot sleep in a moving car")
+    end
+
+    if sleepNeeded and stats then
+        local zombies = (stats.getNumVisibleZombies and stats:getNumVisibleZombies() > 0) or
+            (stats.getNumChasingZombies and stats:getNumChasingZombies() > 0) or
+            (stats.getNumVeryCloseZombies and stats:getNumVeryCloseZombies() > 0)
+        if zombies then
+            return false, YourDash_Text("IGUI_Sleep_NotSafe", "not safe")
+        end
+    end
+
+    if sleepNeeded and playerObj.getHoursSurvived and playerObj.getLastHourSleeped and
+            ((playerObj:getHoursSurvived() - playerObj:getLastHourSleeped()) <= 1) then
+        return false, YourDash_Text("ContextMenu_NoSleepTooEarly", "too early to sleep")
+    end
+
+    local sleepingTabletEffect = playerObj.getSleepingTabletEffect and (playerObj:getSleepingTabletEffect() or 0) or 0
+    if sleepingTabletEffect < 2000 then
+        local moodles = playerObj.getMoodles and playerObj:getMoodles() or nil
+        local fatigue = stats and stats.get and CharacterStat and CharacterStat.FATIGUE and stats:get(CharacterStat.FATIGUE) or 1
+        if moodles and moodles.getMoodleLevel and MoodleType then
+            if MoodleType.PAIN and moodles:getMoodleLevel(MoodleType.PAIN) >= 2 and fatigue <= 0.85 then
+                return false, YourDash_Text("ContextMenu_PainNoSleep", "too much pain")
+            end
+            if MoodleType.PANIC and moodles:getMoodleLevel(MoodleType.PANIC) >= 1 then
+                return false, YourDash_Text("ContextMenu_PanicNoSleep", "too panicked")
+            end
+        end
+    end
+
+    return true, YourDash_Text("ContextMenu_Sleep", "sleep")
+end
+
 local HEAVY_LIGHT_ALIGN_X = { ["0.75x"] = 1, ["1x"] = 2, ["1.4x"] = 3, ["2x"] = 4 }
+local HEAVY_LIGHT_HITBOX = {
+    ["0.75x"] = { x = 17, y = 17, width = 39, height = 39 },
+    ["1x"] = { x = 23, y = 23, width = 51, height = 51 },
+    ["1.4x"] = { x = 32, y = 32, width = 72, height = 72 },
+    ["2x"] = { x = 46, y = 46, width = 102, height = 102 },
+}
 
 -- =========================
 -- YourDash: texture-size and damage-overlay options
@@ -172,7 +277,7 @@ ISVehicleDashboard.WARN_FUEL_X,    ISVehicleDashboard.WARN_FUEL_Y    = 325, 97
 ISVehicleDashboard.WARN_LIGHT_X,   ISVehicleDashboard.WARN_LIGHT_Y   = 257, 27
 
 ISVehicleDashboard.CTRL_SPEEDREG_X, ISVehicleDashboard.CTRL_SPEEDREG_Y = 388, 127
-ISVehicleDashboard.CTRL_GEAR_X,     ISVehicleDashboard.CTRL_GEAR_Y     = 170, 126
+ISVehicleDashboard.CTRL_GEAR_X,     ISVehicleDashboard.CTRL_GEAR_Y     = 176, 128
 ISVehicleDashboard.CTRL_ENGINE_X,   ISVehicleDashboard.CTRL_ENGINE_Y   = 208, 68
 ISVehicleDashboard.CTRL_BATTERY_X,  ISVehicleDashboard.CTRL_BATTERY_Y  = 234, 68
 ISVehicleDashboard.CTRL_LIGHTS_X,   ISVehicleDashboard.CTRL_LIGHTS_Y   = 66, 130
@@ -537,6 +642,155 @@ function ISVehicleDashboard:_hasBatteryPower()
     return self.vehicle:getBatteryCharge() > 0
 end
 
+function ISVehicleDashboard:_YourDashSetSideButtonTexture(button, texture)
+    if not button or not texture then return end
+    button.texture = texture
+    button:setWidth(texture:getWidthOrig())
+    button:setHeight(texture:getHeightOrig())
+end
+
+function ISVehicleDashboard:_YourDashRequestSeatSwitch(seatTo)
+    local character = self.character
+    local vehicle = (character and character.getVehicle and character:getVehicle()) or self.vehicle
+    if not character or not vehicle or not ISVehicleMenu or not ISVehicleMenu.onSwitchSeat then return end
+
+    if getGameSpeed then
+        if getGameSpeed() == 0 then return end
+        if getGameSpeed() > 1 and setGameSpeed then setGameSpeed(1) end
+    end
+
+    if not YourDash_IsSeatInstalled(vehicle, seatTo) then return end
+    if vehicle.getCharacter and vehicle:getCharacter(seatTo) then return end
+
+    local currentSeat = vehicle.getSeat and vehicle:getSeat(character) or -1
+    if currentSeat == -1 or currentSeat == seatTo then return end
+    if vehicle.canSwitchSeat and not vehicle:canSwitchSeat(currentSeat, seatTo) then return end
+
+    if ISVehicleMenu.moveItemsFromSeat and vehicle.getPartForSeatContainer then
+        local okPart, seatPart = pcall(vehicle.getPartForSeatContainer, vehicle, seatTo)
+        local container = okPart and seatPart and seatPart.getItemContainer and seatPart:getItemContainer() or nil
+        if container and container.getCapacity and container.getCapacityWeight then
+            local minWeight = (container:getCapacity() or 0) / 4
+            local weight = container:getCapacityWeight() or 0
+            if weight > minWeight and not ISVehicleMenu.moveItemsFromSeat(character, vehicle, seatTo, true, false) then
+                return
+            end
+        end
+    end
+
+    return ISVehicleMenu.onSwitchSeat(character, seatTo)
+end
+
+function ISVehicleDashboard:onYourDashMoveToPassenger()
+    return self:_YourDashRequestSeatSwitch(1)
+end
+
+function ISVehicleDashboard:onYourDashSleep()
+    local character = self.character
+    local vehicle = (character and character.getVehicle and character:getVehicle()) or self.vehicle
+    if not character or not vehicle or not ISVehicleMenu or not ISVehicleMenu.onSleep then return end
+
+    if getGameSpeed then
+        if getGameSpeed() == 0 then return end
+        if getGameSpeed() > 1 and setGameSpeed then setGameSpeed(1) end
+    end
+
+    if not YourDash_CanSleepInVehicle(character, vehicle) then return end
+    return ISVehicleMenu.onSleep(character, vehicle)
+end
+
+function ISVehicleDashboard:_YourDashEnsureSideButtons()
+    if self.__YourDashSideButtonsCreated then return end
+
+    local function makeButton(texture, onclick, tooltip)
+        if not texture then return nil end
+        local button = ISImage:new(0, 0, texture:getWidthOrig(), texture:getHeightOrig(), texture)
+        button:initialise()
+        button:instantiate()
+        button.target = self
+        button.onclick = onclick
+        button.mouseovertext = tooltip
+        button.alpha = 0.5
+        button.backgroundColor = { r=0, g=0, b=0, a=0 }
+        self:addChild(button)
+        self:_installPressedEffect(button, 0.96)
+        return button
+    end
+
+    self.__YourDashMoveSeatButton = makeButton(
+        self.__YourDashMovePassengerTex or YourDash_ButtonTexture("btn_move_to_passenger.png"),
+        ISVehicleDashboard.onYourDashMoveToPassenger,
+        "move to passenger seat"
+    )
+    self.__YourDashSleepButton = makeButton(
+        self.__YourDashSleepTex or YourDash_ButtonTexture("btn_sleep.png"),
+        ISVehicleDashboard.onYourDashSleep,
+        YourDash_Text("ContextMenu_Sleep", "sleep")
+    )
+    self.__YourDashSideButtonsCreated =
+        self.__YourDashMoveSeatButton ~= nil or self.__YourDashSleepButton ~= nil
+end
+
+function ISVehicleDashboard:_YourDashPositionSideButtons()
+    if not self.backgroundTex then return end
+    local seatButton = self.__YourDashMoveSeatButton
+    local sleepButton = self.__YourDashSleepButton
+    if not seatButton and not sleepButton then return end
+
+    local scale = YourDash.GetScale and YourDash.GetScale() or 1
+    local gap = math.max(1, math.floor(2 * scale + 0.5))
+    local x = self.backgroundTex:getX() + self.backgroundTex:getWidth() + gap
+    local stackH = 0
+    if seatButton then stackH = stackH + seatButton:getHeight() end
+    if sleepButton then
+        if stackH > 0 then stackH = stackH + gap end
+        stackH = stackH + sleepButton:getHeight()
+    end
+    local y = math.max(self.backgroundTex:getY(),
+        self.backgroundTex:getY() + self.backgroundTex:getHeight() - stackH)
+    local right = self.backgroundTex:getX() + self.backgroundTex:getWidth()
+    local bottom = self.backgroundTex:getY() + self.backgroundTex:getHeight()
+
+    if seatButton then
+        seatButton:setX(x)
+        seatButton:setY(y)
+        right = math.max(right, x + seatButton:getWidth())
+        bottom = math.max(bottom, y + seatButton:getHeight())
+        y = y + seatButton:getHeight() + gap
+    end
+    if sleepButton then
+        sleepButton:setX(x)
+        sleepButton:setY(y)
+        right = math.max(right, x + sleepButton:getWidth())
+        bottom = math.max(bottom, y + sleepButton:getHeight())
+    end
+
+    self:setWidth(math.max(self:getWidth() or 0, right))
+    self:setHeight(math.max(self:getHeight() or 0, bottom))
+end
+
+function ISVehicleDashboard:_YourDashUpdateSideButtons()
+    self:_YourDashEnsureSideButtons()
+
+    if self.__YourDashMoveSeatButton then
+        self.__YourDashMoveSeatButton:setVisible(true)
+        self.__YourDashMoveSeatButton.target = self
+        self.__YourDashMoveSeatButton.onclick = ISVehicleDashboard.onYourDashMoveToPassenger
+        self.__YourDashMoveSeatButton.mouseovertext = "move to passenger seat"
+        self.__YourDashMoveSeatButton.__disabled = false
+        YourDash_UpdateHoverAlpha(self.__YourDashMoveSeatButton)
+    end
+    if self.__YourDashSleepButton then
+        local canSleep, sleepTip = YourDash_CanSleepInVehicle(self.character, self.vehicle)
+        self.__YourDashSleepButton:setVisible(true)
+        self.__YourDashSleepButton.target = self
+        self.__YourDashSleepButton.onclick = canSleep and ISVehicleDashboard.onYourDashSleep or nil
+        self.__YourDashSleepButton.mouseovertext = sleepTip or YourDash_Text("ContextMenu_Sleep", "sleep")
+        self.__YourDashSleepButton.__disabled = not canSleep
+        YourDash_UpdateHoverAlpha(self.__YourDashSleepButton)
+    end
+end
+
 -- Vehicle alarms drive BaseVehicle:setHeadlightsOn() directly for each flash,
 -- so getHeadlightsOn() is not a stable representation of the driver's switch
 -- while an alarm is active.  Keep the last non-alarm state for the dashboard
@@ -574,12 +828,15 @@ function ISVehicleDashboard:_YourDashPositionWindowState(state)
     if not self.windowTex or not self.backgroundTex then return end
     local layout = YourDash.GetLayout and YourDash.GetLayout(self) or nil
     local controls = layout and layout.controls or nil
-    local key = state == "down" and "windowDown" or (state == "up" and "windowUp" or "window")
-    local point = controls and (controls[key] or controls.window) or nil
-    if not point then return end
+    local point = controls and controls.window or nil
     local scale = YourDash.GetScale and YourDash.GetScale() or 1
-    local x = math.floor((point.x or point[1] or 0) * scale + 0.5)
-    local y = math.floor((point.y or point[2] or 0) * scale + 0.5)
+    local x, y = nil, nil
+    if YourDash.GetLayoutPoint then
+        x, y = YourDash.GetLayoutPoint(self, "controls", "window")
+    end
+    if (x == nil or y == nil) and not point then return end
+    x = x or math.floor((point.x or point[1] or 0) * scale + 0.5)
+    y = y or math.floor((point.y or point[2] or 0) * scale + 0.5)
     self.windowTex:setX(self.backgroundTex:getX() + x)
     self.windowTex:setY(self.backgroundTex:getY() + y)
 end
@@ -836,6 +1093,18 @@ function ISVehicleDashboard:_installPressedEffect(img, pressedScale)
     end
 end
 
+function ISVehicleDashboard:_installStaticTextureRender(img)
+    if not img or img.__YourDashStaticRenderInstalled then return end
+    img.__YourDashStaticRenderInstalled = true
+
+    function img:render()
+        if not self.texture then return end
+        local w, h = self.width, self.height
+        if not w or not h then return end
+        self:drawTextureScaled(self.texture, 0, 0, w, h, self.alpha or 1)
+    end
+end
+
 function ISVehicleDashboard:_setImageEnabled(img, enabled, mouseovertext, onclickFn, target)
     if not img then return end
     img.__disabled = not enabled
@@ -850,6 +1119,40 @@ function ISVehicleDashboard:_setImageTextureAndSize(img, tex)
     img.texture = tex
     img:setWidth(tex:getWidthOrig())
     img:setHeight(tex:getHeightOrig())
+end
+
+function ISVehicleDashboard:_YourDashApplyLightTexture(tex)
+    if not self.lightsTex or not tex then return end
+    self:_setImageTextureAndSize(self.lightsTex, tex)
+
+    if (self.__YourDashFamily or "standard") == "heavy" then
+        local scaleKey = YourDash.GetScaleKey and YourDash.GetScaleKey() or "1x"
+        local hitbox = HEAVY_LIGHT_HITBOX[scaleKey] or HEAVY_LIGHT_HITBOX["1x"]
+        self.lightsTex.__YourDashLightHitbox = hitbox
+        self.lightsTex.__YourDashTextureWidth = tex:getWidthOrig()
+        self.lightsTex.__YourDashTextureHeight = tex:getHeightOrig()
+        self.lightsTex:setWidth(hitbox.width)
+        self.lightsTex:setHeight(hitbox.height)
+    else
+        self.lightsTex.__YourDashLightHitbox = nil
+        self.lightsTex.__YourDashTextureWidth = nil
+        self.lightsTex.__YourDashTextureHeight = nil
+    end
+end
+
+function ISVehicleDashboard:_YourDashPositionLightsControl(x, y)
+    if not self.lightsTex or not self.backgroundTex then return end
+
+    local offsetX, offsetY = 0, 0
+    if (self.__YourDashFamily or "standard") == "heavy" then
+        local scaleKey = YourDash.GetScaleKey and YourDash.GetScaleKey() or "1x"
+        local hitbox = self.lightsTex.__YourDashLightHitbox or HEAVY_LIGHT_HITBOX[scaleKey] or HEAVY_LIGHT_HITBOX["1x"]
+        offsetX = hitbox.x or 0
+        offsetY = hitbox.y or 0
+    end
+
+    self.lightsTex:setX(self.backgroundTex:getX() + (x or 0) + offsetX)
+    self.lightsTex:setY(self.backgroundTex:getY() + (y or 0) + offsetY)
 end
 
 -- =========================
@@ -894,6 +1197,10 @@ function ISVehicleDashboard:_YourDashApplyOffsets(useLarge)
     local gauges = layout and (layout.gauges or layout.gauge) or nil
     local scale = YourDash.GetScale and YourDash.GetScale() or (useLarge and 2 or 1)
     local function point(name, fallbackX, fallbackY)
+        if YourDash.GetLayoutPoint then
+            local x, y = YourDash.GetLayoutPoint(self, "gauges", name)
+            if x ~= nil and y ~= nil then return { x = x, y = y } end
+        end
         local p = gauges and gauges[name] or nil
         local x = p and (p.x or p[1]) or fallbackX
         local y = p and (p.y or p[2]) or fallbackY
@@ -946,6 +1253,43 @@ function ISVehicleDashboard:_YourDashEnsureStateLEDs()
     ensure("__YourDashTrunkLED")
 end
 
+function ISVehicleDashboard:_YourDashHasTrunkLock()
+    return self.vehicle and (self.vehicle:getPartById("TruckBed") ~= nil)
+end
+
+function ISVehicleDashboard:_YourDashUpdateDashBaseForTrunk()
+    local useNoTrunk = self.__YourDashFamily == "heavy" and
+        self.__dashTexNoTrunk and
+        self.vehicle and
+        (not self:_YourDashHasTrunkLock())
+    self.__dashTex = useNoTrunk and self.__dashTexNoTrunk or (self.__dashTexDefault or self.__dashTex)
+end
+
+function ISVehicleDashboard:_YourDashPositionTrunkControl(hasTrunkLock)
+    if not self.trunkTex or not self.backgroundTex then return end
+
+    local layout = YourDash.GetLayout and YourDash.GetLayout(self) or nil
+    local controls = layout and layout.controls or nil
+    local scale = YourDash.GetScale and YourDash.GetScale() or 1
+    local function pos(name, fallbackX, fallbackY)
+        if YourDash.GetLayoutPoint then
+            local x, y = YourDash.GetLayoutPoint(self, "controls", name)
+            if x ~= nil and y ~= nil then return x, y end
+        end
+        local p = controls and controls[name] or nil
+        local x = p and (p.x or p[1]) or fallbackX
+        local y = p and (p.y or p[2]) or fallbackY
+        return math.floor((x or 0) * scale + 0.5), math.floor((y or 0) * scale + 0.5)
+    end
+
+    local x, y = pos("trunk", self.CTRL_TRUNK_X, self.CTRL_TRUNK_Y)
+    if hasTrunkLock == false then
+        x, y = pos("trunkBlank", x / scale, y / scale)
+    end
+    self.trunkTex:setX(self.backgroundTex:getX() + x)
+    self.trunkTex:setY(self.backgroundTex:getY() + y)
+end
+
 function ISVehicleDashboard:_YourDashApplyTextureSet(_useLarge, isInit)
     local family = self.__YourDashFamily or "standard"
     local accent = self.__YourDashAccent or "base"
@@ -980,7 +1324,10 @@ function ISVehicleDashboard:_YourDashApplyTextureSet(_useLarge, isInit)
     self.__bg_lid = tex("gauge_lid.png") or self.__bg_day
     local dashName = "dash.png"
     if family == "sport" then dashName = "dash_" .. accent .. ".png" end
-    self.__dashTex = tex(dashName) or tex("dash_base.png") or tex("dash.png")
+    self.__dashTexDefault = tex(dashName) or tex("dash_base.png") or tex("dash.png")
+    self.__dashTexNoTrunk = (family == "heavy") and (tex("dash_no_trunk.png") or self.__dashTexDefault) or nil
+    self.__dashTex = self.__dashTexDefault
+    self:_YourDashUpdateDashBaseForTrunk()
     self.__dashShadowTex = tex("dash_shadow.png")
 
     if self.__bg_day then self.dashboardBG = self.__bg_day end
@@ -1056,8 +1403,19 @@ function ISVehicleDashboard:_YourDashApplyTextureSet(_useLarge, isInit)
     if self.__light_knob then self.iconLights = self.__light_knob end
     if self.doorTex and self.__lock_off then self:_setImageTextureAndSize(self.doorTex, self.__lock_off) end
     if self.trunkTex and self.__trunk_off then self:_setImageTextureAndSize(self.trunkTex, self.__trunk_off) end
-    if self.lightsTex and self.__light_knob then self:_setImageTextureAndSize(self.lightsTex, self.__light_knob) end
-    if self.windowTex and self.__window_switch then self:_setImageTextureAndSize(self.windowTex, self.__window_switch) end
+    if self.lightsTex and self.__light_knob then self:_YourDashApplyLightTexture(self.__light_knob) end
+    if self.windowTex and self.__window_switch then
+        self:_setImageTextureAndSize(self.windowTex, self.__window_switch)
+        self:_YourDashPositionWindowState("neutral")
+    end
+    self.__YourDashMovePassengerTex = YourDash_ButtonTexture("btn_move_to_passenger.png")
+    self.__YourDashSleepTex = YourDash_ButtonTexture("btn_sleep.png")
+    if self.__YourDashMoveSeatButton and self.__YourDashMovePassengerTex then
+        self:_YourDashSetSideButtonTexture(self.__YourDashMoveSeatButton, self.__YourDashMovePassengerTex)
+    end
+    if self.__YourDashSleepButton and self.__YourDashSleepTex then
+        self:_YourDashSetSideButtonTexture(self.__YourDashSleepButton, self.__YourDashSleepTex)
+    end
     -- Heavy binary controls carry their pressed/released depth in separate
     -- textures.  Do not add the generic click-scale animation on top.
     local binaryPressedScale = family == "heavy" and 1.0 or 0.96
@@ -1655,7 +2013,7 @@ function ISVehicleDashboard:createChildren()
 
     -- Lights knob (reuse lightsTex)
     if self.lightsTex and self.__light_knob then
-        self:_setImageTextureAndSize(self.lightsTex, self.__light_knob)
+        self:_YourDashApplyLightTexture(self.__light_knob)
         self:_setImageEnabled(self.lightsTex, true, getText("Tooltip_Dashboard_Headlights"), ISVehicleDashboard.onClickHeadlights, self)
         -- Only the sport switch uses the generic press shrink.  Standard is a
         -- rotating knob; heavy has authored OFF/ON depth textures.
@@ -1676,8 +2034,15 @@ function ISVehicleDashboard:createChildren()
             end
 
             local ang = family == "heavy" and 0 or ((dash and dash.__lightKnobAngle) or 0)
-            local cx = self.x + (self.width  * 0.5)
-            local cy = self.y + (self.height * 0.5)
+            local textureW = self.__YourDashTextureWidth or self.width
+            local textureH = self.__YourDashTextureHeight or self.height
+            local hitbox = self.__YourDashLightHitbox
+            local cx = self.x + (textureW * 0.5)
+            local cy = self.y + (textureH * 0.5)
+            if family == "heavy" and hitbox then
+                cx = cx - (hitbox.x or 0)
+                cy = cy - (hitbox.y or 0)
+            end
             if family == "heavy" and dash then
                 cx = cx + (dash.__YourDashHeavyLightAlignX or 0)
                 cy = cy + (dash.__YourDashHeavyLightAlignY or 0)
@@ -1699,7 +2064,7 @@ function ISVehicleDashboard:createChildren()
         self.windowTex.onclick = ISVehicleDashboard.onClickWindow
         self.windowTex.backgroundColor = { r=0, g=0, b=0, a=0 }
 
-        self:_installPressedEffect(self.windowTex, 1)
+        self:_installStaticTextureRender(self.windowTex)
         self:addChild(self.windowTex)
         self:_setImageTextureAndSize(self.windowTex, self.__window_switch)
         self.windowTex.__pressed = false
@@ -1770,6 +2135,8 @@ function ISVehicleDashboard:createChildren()
             return true
         end
     end
+
+    self:_YourDashEnsureSideButtons()
 
     -- Background stacking: day always, lid drawn on top (inside backgroundTex render)
     if self.backgroundTex and (not self.backgroundTex.__YourDashBgStacked) then
@@ -1899,6 +2266,7 @@ function ISVehicleDashboard:prerender()
     if self.__YourDashTextureKey ~= wantedTextureKey then
         self:_YourDashApplyTextureSet(scaleKey == "2x", false)
     end
+    self:_YourDashUpdateDashBaseForTrunk()
 
     _oldPrerender(self)
     self:_YourDashScaleIgnition()
@@ -2002,7 +2370,8 @@ function ISVehicleDashboard:prerender()
 
     -- Trunk icon (don't swap when no power)
     if self.trunkTex and self.__blank_btn and self.vehicle then
-        local hasTrunk = (self.vehicle:getPartById("TruckBed") ~= nil)
+        local hasTrunk = self:_YourDashHasTrunkLock()
+        self:_YourDashPositionTrunkControl(hasTrunk)
         self.trunkTex:setVisible(true)
 
         if not hasTrunk then
@@ -2046,9 +2415,12 @@ function ISVehicleDashboard:prerender()
             if self.vehicle:areAllDoorsLocked() then doorLED = self.__led_on
             elseif self.vehicle:isAnyDoorLocked() then doorLED = self.__led_partial or self.__led_off end
         end
-        local trunkLED = self.__led_off
-        if hasPower and self.vehicle:getPartById("TruckBed") and self.vehicle:isTrunkLocked() then
-            trunkLED = self.__led_on
+        local trunkLED = nil
+        if self:_YourDashHasTrunkLock() then
+            trunkLED = self.__led_off
+            if hasPower and self.vehicle:isTrunkLocked() then
+                trunkLED = self.__led_on
+            end
         end
         setStateLED(self.__YourDashDoorLED, doorLED)
         setStateLED(self.__YourDashTrunkLED, trunkLED)
@@ -2062,7 +2434,7 @@ function ISVehicleDashboard:prerender()
     local lightSwitchOn = self:_YourDashGetHeadlightSwitchState()
     if self.__YourDashFamily == "heavy" and self.lightsTex then
         local t = lightSwitchOn and self.__light_knob_on or self.__light_knob_off
-        if t and self.lightsTex.texture ~= t then self:_setImageTextureAndSize(self.lightsTex, t) end
+        if t and self.lightsTex.texture ~= t then self:_YourDashApplyLightTexture(t) end
         -- Measured from the hollow circular base rather than the pressed
         -- artwork's outer shadow.  The logical-ON (*_off filename) export is
         -- left-shifted by 1/2/3/4 px across the four authored scales.
@@ -2129,7 +2501,7 @@ function ISVehicleDashboard:prerender()
 
             -- Gear label only when dash is "on": battery power + key inserted OR hotwired
             if self.btn_partSpeed then
-                local showGear = self.__YourDashFamily ~= "sport" and hasPower and
+                local showGear = hasPower and
                     (keysInIgnition or (hotwired and engineRunning))
                 self.btn_partSpeed:setVisible(showGear)
                 if not showGear then
@@ -2378,6 +2750,8 @@ function ISVehicleDashboard:prerender()
     -- keep vanilla engine/battery hidden even though oldPrerender may touch them
     if self.engineTex then self.engineTex:setVisible(false) end
     if self.batteryTex then self.batteryTex:setVisible(false) end
+    self:_YourDashUpdateSideButtons()
+    self:_YourDashPositionSideButtons()
 
 end
 
@@ -2401,36 +2775,40 @@ function ISVehicleDashboard:onResolutionChange()
     local warnings = layout and layout.warnings or {}
     local scale = YourDash.GetScale and YourDash.GetScale() or 1
     local useLarge = scale >= 1.4
-    local function pos(section, name, fallbackX, fallbackY)
+    local function pos(sectionName, section, name, fallbackX, fallbackY)
+        if YourDash.GetLayoutPoint then
+            local x, y = YourDash.GetLayoutPoint(self, sectionName, name)
+            if x ~= nil and y ~= nil then return x, y end
+        end
         local p = section and section[name] or nil
         local x = p and (p.x or p[1]) or fallbackX
         local y = p and (p.y or p[2]) or fallbackY
         return math.floor((x or 0) * scale + 0.5), math.floor((y or 0) * scale + 0.5)
     end
 
-    local SPEEDREG_X, SPEEDREG_Y = pos(controls, "speedreg", self.CTRL_SPEEDREG_X, self.CTRL_SPEEDREG_Y)
-    local GEAR_X, GEAR_Y = pos(controls, "gear", self.CTRL_GEAR_X, self.CTRL_GEAR_Y)
-    local ENGINE_X, ENGINE_Y = pos(controls, "engine", self.CTRL_ENGINE_X, self.CTRL_ENGINE_Y)
-    local BATTERY_X, BATTERY_Y = pos(controls, "battery", self.CTRL_BATTERY_X, self.CTRL_BATTERY_Y)
-    local LIGHTS_X, LIGHTS_Y = pos(controls, "lights", self.CTRL_LIGHTS_X, self.CTRL_LIGHTS_Y)
-    local IGNITION_X, IGNITION_Y = pos(controls, "ignition", self.CTRL_IGNITION_X, self.CTRL_IGNITION_Y)
-    local FUEL_X, FUEL_Y = pos(controls, "fuelArrow", self.CTRL_FUEL_ARROW_X, self.CTRL_FUEL_ARROW_Y)
-    local FUEL_L_X, FUEL_L_Y = pos(controls, "fuelArrowLeft", FUEL_X / scale, FUEL_Y / scale)
-    local FUEL_R_X, FUEL_R_Y = pos(controls, "fuelArrowRight", FUEL_X / scale, FUEL_Y / scale)
-    local DOOR_X, DOOR_Y = pos(controls, "door", self.CTRL_DOOR_X, self.CTRL_DOOR_Y)
-    local TRUNK_X, TRUNK_Y = pos(controls, "trunk", self.CTRL_TRUNK_X, self.CTRL_TRUNK_Y)
-    local DOOR_LED_X, DOOR_LED_Y = pos(controls, "doorLED", DOOR_X / scale, DOOR_Y / scale)
-    local TRUNK_LED_X, TRUNK_LED_Y = pos(controls, "trunkLED", TRUNK_X / scale, TRUNK_Y / scale)
-    local WINDOW_X, WINDOW_Y = pos(controls, "window", self.CTRL_WINDOW_X, self.CTRL_WINDOW_Y)
+    local SPEEDREG_X, SPEEDREG_Y = pos("controls", controls, "speedreg", self.CTRL_SPEEDREG_X, self.CTRL_SPEEDREG_Y)
+    local GEAR_X, GEAR_Y = pos("controls", controls, "gear", self.CTRL_GEAR_X, self.CTRL_GEAR_Y)
+    local ENGINE_X, ENGINE_Y = pos("controls", controls, "engine", self.CTRL_ENGINE_X, self.CTRL_ENGINE_Y)
+    local BATTERY_X, BATTERY_Y = pos("controls", controls, "battery", self.CTRL_BATTERY_X, self.CTRL_BATTERY_Y)
+    local LIGHTS_X, LIGHTS_Y = pos("controls", controls, "lights", self.CTRL_LIGHTS_X, self.CTRL_LIGHTS_Y)
+    local IGNITION_X, IGNITION_Y = pos("controls", controls, "ignition", self.CTRL_IGNITION_X, self.CTRL_IGNITION_Y)
+    local FUEL_X, FUEL_Y = pos("controls", controls, "fuelArrow", self.CTRL_FUEL_ARROW_X, self.CTRL_FUEL_ARROW_Y)
+    local FUEL_L_X, FUEL_L_Y = pos("controls", controls, "fuelArrowLeft", FUEL_X / scale, FUEL_Y / scale)
+    local FUEL_R_X, FUEL_R_Y = pos("controls", controls, "fuelArrowRight", FUEL_X / scale, FUEL_Y / scale)
+    local DOOR_X, DOOR_Y = pos("controls", controls, "door", self.CTRL_DOOR_X, self.CTRL_DOOR_Y)
+    local TRUNK_X, TRUNK_Y = pos("controls", controls, "trunk", self.CTRL_TRUNK_X, self.CTRL_TRUNK_Y)
+    local DOOR_LED_X, DOOR_LED_Y = pos("controls", controls, "doorLED", DOOR_X / scale, DOOR_Y / scale)
+    local TRUNK_LED_X, TRUNK_LED_Y = pos("controls", controls, "trunkLED", TRUNK_X / scale, TRUNK_Y / scale)
+    local WINDOW_X, WINDOW_Y = pos("controls", controls, "window", self.CTRL_WINDOW_X, self.CTRL_WINDOW_Y)
 
-    local WCX, WCY = pos(warnings, "cruise", self.WARN_CRUISE_X, self.WARN_CRUISE_Y)
-    local WBX, WBY = pos(warnings, "battery", self.WARN_BATTERY_X, self.WARN_BATTERY_Y)
-    local WRX, WRY = pos(warnings, "brake", self.WARN_BRAKE_X, self.WARN_BRAKE_Y)
-    local WKX, WKY = pos(warnings, "check", self.WARN_CHECK_X, self.WARN_CHECK_Y)
-    local WSX, WSY = pos(warnings, "stop", self.WARN_STOP_X, self.WARN_STOP_Y)
-    local WDX, WDY = pos(warnings, "door", self.WARN_DOOR_X, self.WARN_DOOR_Y)
-    local WFX, WFY = pos(warnings, "fuel", self.WARN_FUEL_X, self.WARN_FUEL_Y)
-    local WLX, WLY = pos(warnings, "light", self.WARN_LIGHT_X, self.WARN_LIGHT_Y)
+    local WCX, WCY = pos("warnings", warnings, "cruise", self.WARN_CRUISE_X, self.WARN_CRUISE_Y)
+    local WBX, WBY = pos("warnings", warnings, "battery", self.WARN_BATTERY_X, self.WARN_BATTERY_Y)
+    local WRX, WRY = pos("warnings", warnings, "brake", self.WARN_BRAKE_X, self.WARN_BRAKE_Y)
+    local WKX, WKY = pos("warnings", warnings, "check", self.WARN_CHECK_X, self.WARN_CHECK_Y)
+    local WSX, WSY = pos("warnings", warnings, "stop", self.WARN_STOP_X, self.WARN_STOP_Y)
+    local WDX, WDY = pos("warnings", warnings, "door", self.WARN_DOOR_X, self.WARN_DOOR_Y)
+    local WFX, WFY = pos("warnings", warnings, "fuel", self.WARN_FUEL_X, self.WARN_FUEL_Y)
+    local WLX, WLY = pos("warnings", warnings, "light", self.WARN_LIGHT_X, self.WARN_LIGHT_Y)
 
 
     if self.speedregulatorTex then
@@ -2450,8 +2828,7 @@ function ISVehicleDashboard:onResolutionChange()
         self.batteryTex:setY(self.backgroundTex:getY() + BATTERY_Y)
     end
     if self.lightsTex then
-        self.lightsTex:setX(self.backgroundTex:getX() + LIGHTS_X)
-        self.lightsTex:setY(self.backgroundTex:getY() + LIGHTS_Y)
+        self:_YourDashPositionLightsControl(LIGHTS_X, LIGHTS_Y)
     end
     if self.ignitionTex then
         self.ignitionTex:setX(self.backgroundTex:getX() + IGNITION_X)
@@ -2481,8 +2858,7 @@ function ISVehicleDashboard:onResolutionChange()
         self.doorTex:setY(self.backgroundTex:getY() + DOOR_Y)
     end
     if self.trunkTex then
-        self.trunkTex:setX(self.backgroundTex:getX() + TRUNK_X)
-        self.trunkTex:setY(self.backgroundTex:getY() + TRUNK_Y)
+        self:_YourDashPositionTrunkControl(self.vehicle and self:_YourDashHasTrunkLock() or nil)
     end
     if self.windowTex then
         self.windowTex:setX(self.backgroundTex:getX() + WINDOW_X)
@@ -2546,6 +2922,7 @@ function ISVehicleDashboard:onResolutionChange()
         if self._YourDashPositionGlassOverlay then self:_YourDashPositionGlassOverlay() end
         if self._YourDashFinalizeWearOrder then self:_YourDashFinalizeWearOrder() end
     end
+    self:_YourDashPositionSideButtons()
     self:_YourDashApplyGearFont(useLarge)
 
 end

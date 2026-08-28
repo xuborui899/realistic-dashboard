@@ -135,9 +135,17 @@ end
 local function ydRadioAnchor(dash, layoutKey, fallbackX, fallbackY, scale)
     local x, y = fallbackX, fallbackY
     local point = nil
+    if dash and dash._paxGetRadioAnchor then
+        local radioWidth = dash.valueRadioBG and dash.valueRadioBG.getWidth and dash.valueRadioBG:getWidth() or nil
+        local ok, px, py = pcall(dash._paxGetRadioAnchor, dash, "standard", fallbackX, fallbackY, scale, radioWidth)
+        if ok and px ~= nil and py ~= nil then return px, py end
+    end
     if dash and dash._paxGetLayout1x then
         local ok, layout = pcall(dash._paxGetLayout1x, dash)
         point = ok and layout and layout.radioStandard or nil
+    elseif YourDash and YourDash.GetLayoutPoint then
+        local ok, px, py = pcall(YourDash.GetLayoutPoint, dash, "radio", "standard")
+        if ok and px ~= nil and py ~= nil then return px, py end
     elseif YourDash and YourDash.GetLayout then
         local ok, layout = pcall(YourDash.GetLayout, dash)
         point = ok and layout and layout[layoutKey] or nil

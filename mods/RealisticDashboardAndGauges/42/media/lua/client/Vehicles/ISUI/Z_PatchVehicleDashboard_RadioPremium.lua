@@ -5,10 +5,12 @@ require "YourDash/DashboardCore"
 require "Vehicles/ISUI/ISVehicleDashboard"
 require "ISUI/ISImage"
 require "ISUI/ISPanel"
+require "TimedActions/ISBaseTimedAction"
 require "TimedActions/ISTimedActionQueue"
 require "RadioCom/ISRadioAction"
 require "RadioCom/RadioWindowModules/RWMPanel" -- PresetEntry.new
 require "ISUI/ISContextMenu"
+pcall(function() require "ISUI/ISInventoryPaneContextMenu" end)
 
 if ISVehicleDashboard.__YourDashRadioPremiumLoaded then return end
 ISVehicleDashboard.__YourDashRadioPremiumLoaded = true
@@ -59,6 +61,13 @@ ISVehicleDashboard.RADIO_TEXT_VOL_Y  = 24
 
 ISVehicleDashboard.RADIO_TEXT_FREQ_X = -32  -- negative = from right edge
 ISVehicleDashboard.RADIO_TEXT_FREQ_Y = 24
+
+ISVehicleDashboard.RADIO_TEXT_VOL_CENTER_X = 48
+ISVehicleDashboard.RADIO_TEXT_FREQ_CENTER_X = -52
+ISVehicleDashboard.RADIO_TEXT_SIDE_NUMBER_Y = 24
+ISVehicleDashboard.RADIO_TEXT_SIDE_BLOCK_W = 42
+ISVehicleDashboard.RADIO_TEXT_SIDE_NUMBER_ZOOM = 1.12
+ISVehicleDashboard.RADIO_TEXT_MAIN_ZOOM = 1.08
 
 ISVehicleDashboard.RADIO_TEXT_NAME_X = 0    -- 0 = centered
 ISVehicleDashboard.RADIO_TEXT_NAME_Y = 24
@@ -160,21 +169,20 @@ local function ydUIFont()
     return UIFont.Small
 end
 
--- Side readouts are deliberately one tier smaller than the station/media
--- name on the larger packs.  A further per-pack zoom keeps the complete VOL
--- and MHz labels without letting them consume the middle carousel.
-local function ydCompactUIFont(scale)
-    scale = scale or ydScale()
-    if scale >= 1.75 then return UIFont.Medium end
-    return UIFont.NewSmall or UIFont.Small
-end
-
 local function ydRadioAnchor(dash, layoutKey, fallbackX, fallbackY, scale)
     local x, y = fallbackX, fallbackY
     local point = nil
+    if dash and dash._paxGetRadioAnchor then
+        local radioWidth = dash.radioBG and dash.radioBG.getWidth and dash.radioBG:getWidth() or nil
+        local ok, px, py = pcall(dash._paxGetRadioAnchor, dash, "premium", fallbackX, fallbackY, scale, radioWidth)
+        if ok and px ~= nil and py ~= nil then return px, py end
+    end
     if dash and dash._paxGetLayout1x then
         local ok, layout = pcall(dash._paxGetLayout1x, dash)
         point = ok and layout and layout.radioPremium or nil
+    elseif YourDash and YourDash.GetLayoutPoint then
+        local ok, px, py = pcall(YourDash.GetLayoutPoint, dash, "radio", "premium")
+        if ok and px ~= nil and py ~= nil then return px, py end
     elseif YourDash and YourDash.GetLayout then
         local ok, layout = pcall(YourDash.GetLayout, dash)
         point = ok and layout and layout[layoutKey] or nil
@@ -379,6 +387,64 @@ local function collectMediaItemsFromInventory(inv, wantMediaType)
 end
 
 
+local YourDashVehicleRadioMediaAction = ISBaseTimedAction:derive("YourDashVehicleRadioMediaAction")
+
+function YourDashVehicleRadioMediaAction:isValid()
+    if not self.character or not self.deviceData then return false end
+    if self.isRemove == true then
+        return self.deviceData.hasMedia and self.deviceData:hasMedia()
+    end
+    if not self.secondaryItem then return false end
+    if not (self.deviceData.hasMedia and self.deviceData.getMediaType) then return false end
+    if self.deviceData:hasMedia() then return false end
+    if not self.secondaryItem.getMediaType then return false end
+    return self.deviceData:getMediaType() == self.secondaryItem:getMediaType()
+end
+
+function YourDashVehicleRadioMediaAction:invoke()
+    if self.__didInvoke == true then return end
+    self.__didInvoke = true
+    if not self:isValid() then return end
+
+    if self.isRemove == true then
+        local inv = self.character.getInventory and self.character:getInventory() or nil
+        if inv and self.deviceData.removeMediaItem then
+            self.deviceData:removeMediaItem(inv)
+        end
+    elseif self.deviceData.addMediaItem then
+        self.deviceData:addMediaItem(self.secondaryItem)
+    end
+
+    if self.deviceData.updateSimple then
+        pcall(function() self.deviceData:updateSimple() end)
+    end
+end
+
+function YourDashVehicleRadioMediaAction:perform()
+    self:invoke()
+    ISBaseTimedAction.perform(self)
+end
+
+function YourDashVehicleRadioMediaAction:complete()
+    self:invoke()
+    return true
+end
+
+function YourDashVehicleRadioMediaAction:new(character, device, isRemove, secondaryItem)
+    local o = ISBaseTimedAction.new(self, character)
+    o.character = character
+    o.device = device
+    o.deviceData = device and device.getDeviceData and device:getDeviceData() or nil
+    o.isRemove = isRemove == true
+    o.secondaryItem = secondaryItem
+    o.stopOnWalk = false
+    o.stopOnRun = true
+    o.ignoreHandsWounds = true
+    o.maxTime = 30
+    return o
+end
+
+
 
 local function measureTextX(font, text)
     if not text or text == "" then return 0 end
@@ -398,24 +464,83 @@ local function measureTextHeight(font)
     return ydScaled(16)
 end
 
-local function premiumSideTextZoom(scale, sideFont, lcdHeight)
-    scale = scale or ydScale()
+local function premiumTextZoomForLCD(dash, scale, font, wantedZoom)
+    local zoom = tonumber(wantedZoom) or 1.00
+    local lcdH = math.max(1, ydScaled(dash.RADIO_TEXT_LCD_H or 20, scale))
+    local fontH = math.max(1, measureTextHeight(font))
+    local fitZoom = math.max(0.01, (lcdH - 1) / fontH)
+    return math.min(zoom, fitZoom)
+end
 
-    -- These values keep the side labels visually subordinate to the station
-    -- name while compensating for NewSmall not shrinking with the 0.75x art.
-    local zoom = 0.78
-    if scale <= 0.75 then
-        zoom = 0.62
-    elseif scale >= 1.75 then
-        zoom = 0.82
-    elseif scale >= 1.25 then
-        zoom = 0.90
+local function premiumMainTextZoom(dash, scale, font)
+    return premiumTextZoomForLCD(dash, scale, font, dash.RADIO_TEXT_MAIN_ZOOM or 1.00)
+end
+
+local function drawPremiumCenteredText(panel, text, centerX, y, zoom, r, g, b, a, font)
+    if panel.drawTextZoomed then
+        local w = measureTextX(font, text) * zoom
+        local x = math.floor(centerX - w * 0.5 + 0.5)
+        panel:drawTextZoomed(text, x, y, zoom, r, g, b, a, font)
+    else
+        panel:drawTextCentre(text, centerX, y, r, g, b, a, font)
+    end
+end
+
+local function premiumSideReadoutText(text, side)
+    text = tostring(text or "")
+    if text == "" then return "" end
+
+    local lower = string.lower(text)
+    if side == "left" then
+        local value = string.match(text, "^%s*[Vv][Oo][Ll]%s+(.+)%s*$")
+        if value and value ~= "" then return value end
+    elseif string.find(lower, "mhz", 1, true) then
+        local value = string.match(text, "^%s*([%d%.]+)")
+        if value and value ~= "" then return value end
+    elseif lower == "cd" then
+        return "CD"
     end
 
-    -- Never let a font/locale override make the readout taller than the LCD.
-    local fontHeight = math.max(1, measureTextHeight(sideFont))
-    local heightFit = math.max(0.01, (math.max(1, lcdHeight) - 2) / fontHeight)
-    return math.min(zoom, heightFit)
+    return text
+end
+
+local function premiumSideMaxNumberZoom(dash, scale)
+    return tonumber(dash.RADIO_TEXT_SIDE_NUMBER_ZOOM) or 1.00
+end
+
+local function premiumSideDisplaySpec(dash, width, scale, side, text)
+    scale = scale or ydScale()
+    local number = premiumSideReadoutText(text, side)
+    if number == "" then return nil end
+
+    local numberFont = ydUIFont()
+    local maxBlockWidth = math.max(1, ydScaled(dash.RADIO_TEXT_SIDE_BLOCK_W or 34, scale))
+    local numberWidthRaw = measureTextX(numberFont, number)
+    local numberZoom = premiumTextZoomForLCD(dash, scale, numberFont, premiumSideMaxNumberZoom(dash, scale))
+
+    if numberWidthRaw > 0 then
+        numberZoom = math.min(numberZoom, maxBlockWidth / numberWidthRaw)
+    end
+
+    local centerX
+    if side == "right" then
+        centerX = width + ydScaled(dash.RADIO_TEXT_FREQ_CENTER_X or -47, scale)
+    else
+        centerX = ydScaled(dash.RADIO_TEXT_VOL_CENTER_X or 47, scale)
+    end
+
+    local blockWidth = numberWidthRaw * numberZoom
+    return {
+        number = number,
+        centerX = centerX,
+        numberY = ydScaled(dash.RADIO_TEXT_SIDE_NUMBER_Y or 19, scale),
+        numberFont = numberFont,
+        numberZoom = numberZoom,
+        numberWidth = numberWidthRaw,
+        width = blockWidth,
+        left = centerX - blockWidth * 0.5,
+        right = centerX + blockWidth * 0.5,
+    }
 end
 
 -- Calculate the middle carousel from the actual rendered widths of the two
@@ -433,21 +558,16 @@ local function premiumLCDGeometry(dash, width, scale, mainFont, left, right)
     local lcdY = ydScaled(dash.RADIO_TEXT_LCD_Y or 21, scale)
     local lcdH = math.max(1, ydScaled(dash.RADIO_TEXT_LCD_H or 24, scale))
     local sideGap = math.max(1, ydScaled(dash.RADIO_TEXT_SIDE_GAP or 2, scale))
-    local sideFont = ydCompactUIFont(scale)
-    local sideZoom = premiumSideTextZoom(scale, sideFont, lcdH)
-    local leftWidth = math.ceil(measureTextX(sideFont, left) * sideZoom)
-    local rightWidth = math.ceil(measureTextX(sideFont, right) * sideZoom)
-
-    local leftAnchor = ydScaled(dash.RADIO_TEXT_VOL_X or 32, scale)
-    local rightAnchor = width + ydScaled(dash.RADIO_TEXT_FREQ_X or -32, scale)
+    local leftSpec = premiumSideDisplaySpec(dash, width, scale, "left", left)
+    local rightSpec = premiumSideDisplaySpec(dash, width, scale, "right", right)
     local clipX = lcdX
     local clipRight = lcdRight
 
-    if left ~= "" then
-        clipX = math.max(clipX, leftAnchor + leftWidth + sideGap)
+    if leftSpec then
+        clipX = math.max(clipX, leftSpec.right + sideGap)
     end
-    if right ~= "" then
-        clipRight = math.min(clipRight, rightAnchor - rightWidth - sideGap)
+    if rightSpec then
+        clipRight = math.min(clipRight, rightSpec.left - sideGap)
     end
 
     -- Defensive fallback for unusual translated fonts.  It remains confined
@@ -469,10 +589,8 @@ local function premiumLCDGeometry(dash, width, scale, mainFont, left, right)
         clipY = lcdY,
         clipW = math.max(1, clipRight - clipX),
         clipH = lcdH,
-        sideFont = sideFont,
-        sideZoom = sideZoom,
-        leftWidth = leftWidth,
-        rightWidth = rightWidth,
+        leftSide = leftSpec,
+        rightSide = rightSpec,
         mainFont = mainFont,
     }
 end
@@ -1293,13 +1411,23 @@ function ISVehicleDashboard:_radioAddMediaAux(item)
     if not part then return end
     local dd = part:getDeviceData()
     if not dd then return end
+    if item.getWorldItem and item:getWorldItem() and luautils and luautils.walkAdj then
+        local square = item:getWorldItem():getSquare()
+        if square and not luautils.walkAdj(self.character, square, true) then return end
+    end
+
+    if ISInventoryPaneContextMenu and ISInventoryPaneContextMenu.transferIfNeeded then
+        pcall(function() ISInventoryPaneContextMenu.transferIfNeeded(self.character, item) end)
+    end
 
     if item.getDisplayName then
         self.__radioMediaNameCache = item:getDisplayName()
     end
 
     self.__radioSource = "cd"
-    ISTimedActionQueue.add(ISRadioAction:new("AddMedia", self.character, part, item))
+    self:_ydBroadcastRadioSource("cd")
+    self.__radioCdPaused = false
+    ISTimedActionQueue.add(YourDashVehicleRadioMediaAction:new(self.character, part, false, item))
 end
 
 
@@ -1311,9 +1439,11 @@ function ISVehicleDashboard:_radioRemoveMedia()
     if not dd then return end
 
     self.__radioMediaNameCache = nil
-    ISTimedActionQueue.add(ISRadioAction:new("RemoveMedia", self.character, part))
+    ISTimedActionQueue.add(YourDashVehicleRadioMediaAction:new(self.character, part, true, nil))
 
     self.__radioSource = "radio"
+    self:_ydBroadcastRadioSource("radio")
+    self.__radioCdPaused = false
 end
 
 
@@ -1511,22 +1641,15 @@ function ISVehicleDashboard:_ensureRadioControls()
 
             local scale = dash.__radioPackScale or ydScale()
             local font = ydUIFont()
+            local mainZoom = premiumMainTextZoom(dash, scale, font)
             local left  = dash.__radioTextLeft  or ""
             local mid   = dash.__radioTextMid   or ""
             local right = dash.__radioTextRight or ""
             local armed = dash.__radioSetArmed == true
             local geometry = premiumLCDGeometry(dash, self.width, scale, font, left, right)
             local fullGeometry = premiumLCDGeometry(dash, self.width, scale, font, "", "")
-            local sideFont = geometry.sideFont
-            local sideZoom = geometry.sideZoom or 1
             local rgb  = dash.RADIO_TEXT_RGB  or { r=1, g=1, b=1 }
             local a    = dash.RADIO_TEXT_A    or 0.95
-
-            local VOL_X  = ydScaled(dash.RADIO_TEXT_VOL_X or 0, scale)
-            local VOL_Y  = ydScaled(dash.RADIO_TEXT_VOL_Y or 0, scale)
-
-            local FREQ_X = ydScaled(dash.RADIO_TEXT_FREQ_X or 0, scale)
-            local FREQ_Y = ydScaled(dash.RADIO_TEXT_FREQ_Y or 0, scale)
 
             local NAME_X = ydScaled(dash.RADIO_TEXT_NAME_X or 0, scale)
             local NAME_Y = ydScaled(dash.RADIO_TEXT_NAME_Y or 0, scale)
@@ -1537,8 +1660,20 @@ function ISVehicleDashboard:_ensureRadioControls()
             local CLIP_X, CLIP_Y = geometry.clipX, geometry.clipY
             local CLIP_W, CLIP_H = geometry.clipW, geometry.clipH
             local canStencil = (self.setStencilRect ~= nil) and (self.clearStencilRect ~= nil)
-            local sideYOffset = math.floor(math.max(0,
-                (measureTextHeight(font) - measureTextHeight(sideFont) * sideZoom) * 0.5))
+
+            local function drawSideReadout(spec)
+                if not spec then return end
+                if spec.number ~= "" then
+                    local x = math.floor(spec.centerX - spec.numberWidth * spec.numberZoom * 0.5 + 0.5)
+                    if self.drawTextZoomed then
+                        self:drawTextZoomed(spec.number, x, spec.numberY, spec.numberZoom,
+                            rgb.r, rgb.g, rgb.b, a, spec.numberFont)
+                    else
+                        self:drawTextCentre(spec.number, spec.centerX, spec.numberY,
+                            rgb.r, rgb.g, rgb.b, a, spec.numberFont)
+                    end
+                end
+            end
 
             if dash.__radioLoading == true then
                 local msg  = dash.RADIO_LOADING_TEXT or "Loading..."
@@ -1546,41 +1681,25 @@ function ISVehicleDashboard:_ensureRadioControls()
                     self:setStencilRect(fullGeometry.lcdX, fullGeometry.lcdY,
                         fullGeometry.lcdW, fullGeometry.lcdH)
                 end
-                self:drawTextCentre(
+                drawPremiumCenteredText(
+                    self,
                     msg,
                     fullGeometry.lcdX + fullGeometry.lcdW * 0.5 + (NAME_X or 0),
                     (NAME_Y or 0),
-                    rgb.r, rgb.g, rgb.b, a, font
+                    mainZoom, rgb.r, rgb.g, rgb.b, a, font
                 )
                 if canStencil then self:clearStencilRect() end
                 return
             end
 
-            -- Compact side readouts.  They share one LCD stencil so even an
+            -- Side readouts share one LCD stencil so even an
             -- unexpected frequency value cannot draw onto the bezel.
             if (left ~= "" or right ~= "") and canStencil then
                 self:setStencilRect(fullGeometry.lcdX, fullGeometry.lcdY,
                     fullGeometry.lcdW, fullGeometry.lcdH)
             end
-            if left ~= "" then
-                self:drawTextZoomed(
-                    left,
-                    VOL_X,
-                    VOL_Y + sideYOffset,
-                    sideZoom, rgb.r, rgb.g, rgb.b, a, sideFont
-                )
-            end
-
-            if right ~= "" then
-                local rightWidth = geometry.rightWidth or
-                    math.ceil(measureTextX(sideFont, right) * sideZoom)
-                self:drawTextZoomed(
-                    right,
-                    self.width + (FREQ_X or 0) - rightWidth,
-                    FREQ_Y + sideYOffset,
-                    sideZoom, rgb.r, rgb.g, rgb.b, a, sideFont
-                )
-            end
+            drawSideReadout(geometry.leftSide)
+            drawSideReadout(geometry.rightSide)
             if (left ~= "" or right ~= "") and canStencil then self:clearStencilRect() end
 
             -- CENTER: channel name OR armed message
@@ -1590,11 +1709,12 @@ function ISVehicleDashboard:_ensureRadioControls()
                         self:setStencilRect(fullGeometry.lcdX, fullGeometry.lcdY,
                             fullGeometry.lcdW, fullGeometry.lcdH)
                     end
-                    self:drawTextCentre(
+                    drawPremiumCenteredText(
+                        self,
                         mid,
                         fullGeometry.lcdX + fullGeometry.lcdW * 0.5 + (ARMX or 0),
                         (ARMY or 0),
-                        rgb.r, rgb.g, rgb.b, a, font
+                        mainZoom, rgb.r, rgb.g, rgb.b, a, font
                     )
                     if canStencil then self:clearStencilRect() end
                 end
@@ -1604,25 +1724,32 @@ function ISVehicleDashboard:_ensureRadioControls()
                         -- Marquee mode (left-anchored inside clip box)
                         local gap = ydScaled(dash.RADIO_TEXT_MARQUEE_GAP_PX or 20, scale)
                         local off = dash.__radioMarqueeOffset or 0
-                        local tw  = dash.__radioMarqueeW or measureTextX(font, mid)
+                        local textZoom = self.drawTextZoomed and mainZoom or 1
+                        local tw  = dash.__radioMarqueeW or (measureTextX(font, mid) * textZoom)
 
                         if canStencil then self:setStencilRect(CLIP_X, CLIP_Y, CLIP_W, CLIP_H) end
 
                         local y  = (NAME_Y or 0)
                         local x1 = (CLIP_X - off) + (NAME_X or 0)
-                        self:drawText(mid, x1, y, rgb.r, rgb.g, rgb.b, a, font)
-                        self:drawText(mid, x1 + tw + gap, y, rgb.r, rgb.g, rgb.b, a, font)
+                        if self.drawTextZoomed then
+                            self:drawTextZoomed(mid, x1, y, mainZoom, rgb.r, rgb.g, rgb.b, a, font)
+                            self:drawTextZoomed(mid, x1 + tw + gap, y, mainZoom, rgb.r, rgb.g, rgb.b, a, font)
+                        else
+                            self:drawText(mid, x1, y, rgb.r, rgb.g, rgb.b, a, font)
+                            self:drawText(mid, x1 + tw + gap, y, rgb.r, rgb.g, rgb.b, a, font)
+                        end
 
                         if canStencil then self:clearStencilRect() end
                     else
                         -- Normal mode (centered), clipped
                         if canStencil then self:setStencilRect(CLIP_X, CLIP_Y, CLIP_W, CLIP_H) end
 
-                        self:drawTextCentre(
+                        drawPremiumCenteredText(
+                            self,
                             mid,
                             (CLIP_X + CLIP_W * 0.5) + (NAME_X or 0),
                             (NAME_Y or 0),
-                            rgb.r, rgb.g, rgb.b, a, font
+                            mainZoom, rgb.r, rgb.g, rgb.b, a, font
                         )
 
                         if canStencil then self:clearStencilRect() end
@@ -2094,11 +2221,12 @@ function ISVehicleDashboard:_updateRadioControls()
         else
             local scale = self.__radioPackScale or ydScale()
             local font = ydUIFont()
+            local textZoom = (self.radioBG and self.radioBG.drawTextZoomed) and premiumMainTextZoom(self, scale, font) or 1
             local radioWidth = self.radioBG and self.radioBG:getWidth() or ydScaled(196, scale)
             local geometry = premiumLCDGeometry(self, radioWidth, scale, font,
                 self.__radioTextLeft or "", self.__radioTextRight or "")
             local clipW = geometry.clipW
-            local w = measureTextX(font, mid)
+            local w = measureTextX(font, mid) * textZoom
 
 
             if w > clipW then

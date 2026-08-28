@@ -5,6 +5,7 @@ require "ISUI/ISPanel"
 require "ISUI/ISImage"
 require "Vehicles/ISUI/ISVehicleDashboard"
 require "Vehicles/ISUI/ISVehiclePartMenu"
+require "Vehicles/ISUI/ISVehicleMenu"
 require "Vehicles/VehicleUtils"
 require "YourDash/DashboardCore"
 
@@ -38,6 +39,17 @@ local function paxScaled(value, scale)
     return math.floor(value + 0.5)
 end
 
+local function paxSteppedUIFont(step)
+    local base = YourDash.GetUIFont and YourDash.GetUIFont() or (UIFont and UIFont.Small)
+    step = tonumber(step) or 0
+    if step >= 0 or not UIFont then return base end
+
+    local scaleKey = paxScaleKey()
+    if scaleKey == "2x" then return UIFont.Medium or UIFont.Small or UIFont.NewSmall or base end
+    if scaleKey == "1.4x" then return UIFont.Small or UIFont.NewSmall or base end
+    return UIFont.NewSmall or UIFont.Small or base
+end
+
 local function paxRawTexture(path)
     if not path or not getTexture then return nil end
     local ok, texture = pcall(getTexture, path)
@@ -52,6 +64,101 @@ local function paxSafeCall(object, methodName, ...)
     local ok, value = pcall(method, object, ...)
     if ok then return value end
     return nil
+end
+
+local function paxButtonTexture(name)
+    if not name then return nil end
+    return paxRawTexture(string.format("media/ui/vehicles/buttons/%s/%s", paxScaleKey(), name))
+end
+
+local function paxText(key, fallback)
+    if getText then
+        local ok, text = pcall(getText, key)
+        if ok and text and text ~= key then return text end
+    end
+    return fallback or key
+end
+
+local function paxIsMouseOver(element)
+    if not element or not element.isMouseOver then return false end
+    local ok, value = pcall(element.isMouseOver, element)
+    return ok and value == true
+end
+
+local function paxUpdateHoverAlpha(element)
+    if not element then return end
+    element.alpha = paxIsMouseOver(element) and 1.0 or 0.5
+end
+
+local function paxIsSeatInstalled(vehicle, seat)
+    if not vehicle or seat == nil then return false end
+    if vehicle.isSeatInstalled then
+        local ok, installed = pcall(vehicle.isSeatInstalled, vehicle, seat)
+        if ok then return installed == true end
+    end
+    if vehicle.getPartForSeatContainer then
+        local ok, part = pcall(vehicle.getPartForSeatContainer, vehicle, seat)
+        return ok and part ~= nil
+    end
+    return false
+end
+
+local function paxServerBool(name, default)
+    if not isClient or not isClient() then return default end
+    local options = getServerOptions and getServerOptions() or nil
+    if options and options.getBoolean then
+        local ok, value = pcall(options.getBoolean, options, name)
+        if ok then return value == true end
+    end
+    return default
+end
+
+local function paxCanSleepInVehicle(playerObj, vehicle)
+    if not playerObj or not vehicle then return false, paxText("ContextMenu_Sleep", "sleep") end
+    if isClient and isClient() and not paxServerBool("SleepAllowed", false) then
+        return false, paxText("ContextMenu_Sleep", "sleep")
+    end
+
+    local sleepNeeded = (not isClient or not isClient()) or paxServerBool("SleepNeeded", false)
+    local stats = playerObj.getStats and playerObj:getStats() or nil
+    if sleepNeeded and stats and stats.get and CharacterStat and CharacterStat.FATIGUE and
+            stats:get(CharacterStat.FATIGUE) <= 0.3 then
+        return false, paxText("IGUI_Sleep_NotTiredEnough", "not tired enough")
+    end
+
+    if vehicle.isStopped and not vehicle:isStopped() then
+        return false, paxText("IGUI_PlayerText_CanNotSleepInMovingCar", "cannot sleep in a moving car")
+    end
+
+    if sleepNeeded and stats then
+        local zombies = (stats.getNumVisibleZombies and stats:getNumVisibleZombies() > 0) or
+            (stats.getNumChasingZombies and stats:getNumChasingZombies() > 0) or
+            (stats.getNumVeryCloseZombies and stats:getNumVeryCloseZombies() > 0)
+        if zombies then
+            return false, paxText("IGUI_Sleep_NotSafe", "not safe")
+        end
+    end
+
+    if sleepNeeded and playerObj.getHoursSurvived and playerObj.getLastHourSleeped and
+            ((playerObj:getHoursSurvived() - playerObj:getLastHourSleeped()) <= 1) then
+        return false, paxText("ContextMenu_NoSleepTooEarly", "too early to sleep")
+    end
+
+    local sleepingTabletEffect = playerObj.getSleepingTabletEffect and (playerObj:getSleepingTabletEffect() or 0) or 0
+    if sleepingTabletEffect < 2000 then
+        local moodles = playerObj.getMoodles and playerObj:getMoodles() or nil
+        local fatigue = stats and stats.get and CharacterStat and CharacterStat.FATIGUE and stats:get(CharacterStat.FATIGUE) or 1
+        if moodles and moodles.getMoodleLevel and MoodleType then
+            if MoodleType.PAIN and moodles:getMoodleLevel(MoodleType.PAIN) >= 2 and fatigue <= 0.85 then
+                return false, paxText("ContextMenu_PainNoSleep", "too much pain")
+            end
+            if MoodleType.PANIC and moodles:getMoodleLevel(MoodleType.PANIC) >= 1 then
+                return false, paxText("ContextMenu_PanicNoSleep", "too panicked")
+            end
+        end
+    end
+
+    return true, paxText("ContextMenu_Sleep", "sleep")
 end
 
 local function paxSetMouseTransparent(element)
@@ -88,10 +195,11 @@ YourDashPassengerDashboard.instances = YourDashPassengerDashboard.instances or {
 -- Config.  All positions are authored against each family's 1x passenger art.
 -- =========================
 
--- These two legacy toggles are intentionally the only passenger assets kept
--- at the old shared path.  They are rendered at the active scale below.
-YourDashPassengerDashboard.PAX_BTN_RETRACT   = "media/ui/vehicles/passenger/btn_retract.png"
-YourDashPassengerDashboard.PAX_BTN_EXPAND    = "media/ui/vehicles/passenger/btn_expand.png"
+YourDashPassengerDashboard.PAX_BTN_RETRACT = "btn_retract.png"
+YourDashPassengerDashboard.PAX_BTN_EXPAND  = "btn_expand.png"
+YourDashPassengerDashboard.PAX_BTN_MOVE_TO_DRIVER = "btn_move_to_driver.png"
+YourDashPassengerDashboard.PAX_BTN_SLEEP = "btn_sleep.png"
+YourDashPassengerDashboard.PAX_SIDE_BUTTON_GAP = 2
 
 -- Seat policy: show ONLY for seat index 1 by default (front passenger)
 YourDashPassengerDashboard.PAX_SEAT_INDEX = 1
@@ -104,55 +212,114 @@ YourDashPassengerDashboard.PAX_TIP_EXPAND  = "expand passenger dash"
 
 YourDashPassengerDashboard.PAX_LAYOUTS_1X = {
     standard = {
-        toggle = { x = 22, y = 18 },
-        door = { x = 168, y = 102 },
+        toggle = { x = -18, y = 18 },
+        door = { x = 168, y = 103 },
         window = { x = 198, y = 93 },
         ac = {
-            fan = { x = 24, y = 98 },
+            fan = { x = 24, y = 103 },
             slider = { x = 57, y = 105, travel = 86 },
         },
-        radioPremium = { x = 10, y = 35 },
-        radioStandard = { x = 50, y = 30 },
+        radioPremium = { x = 14, y = 32 },
+        radioStandard = { x = 16, y = 32 },
         barPad = 10,
         barFallback = 70,
     },
     heavy = {
-        toggle = { x = 5, y = 5 },
-        door = { x = 170, y = 85 },
-        window = { x = 204, y = 72 },
+        toggle = { x = -18, y = 5 },
+        door = { x = 170, y = 84 },
+        doorLED = { x = 172, y = 76 },
+        window = { x = 204, y = 68 },
+        windowDown = { x = 203, y = 68 },
+        windowUp = { x = 203, y = 68 },
         ac = {
             background = { x = 1, y = 68 },
             fan = { x = 22, y = 69 },
             -- Center the handle on the black rail; y=92 placed it over COLD/HOT.
             slider = { x = 45, y = 74, travel = 91 },
         },
-        -- Lift each exact-size radio just enough to clear the baked window
-        -- glyph while preserving the requested right-side horizontal alignment.
-        radioPremium = { x = 31, y = -3 },
-        radioStandard = { x = 54, y = 7 },
+        -- Keep the full radio UI inside the narrow heavy passenger dash.
+        radioPremium = { x = 6, y = 3 },
+        radioStandard = { x = 11, y = 5 },
         barPad = 10,
         barFallback = 70,
     },
     sport = {
-        toggle = { x = 5, y = 8 },
-        door = { x = 168, y = 90 },
-        doorLED = { x = 173, y = 125 },
+        toggle = { x = -18, y = 8 },
+        door = { x = 167, y = 90 },
+        doorLED = { x = 172, y = 125 },
         window = { x = 194, y = 78 },
         -- The red passenger export is the tightest canvas (227x137 at 1x),
         -- so the complete climate/clock row is authored to that boundary.
         ac = {
             background = { x = 1, y = 77 },
-            display = { x = 8, y = 80, width = 31, height = 23, textOffsetX = 2 },
+            display = {
+                x = 8, y = 80, width = 31, height = 23, textOffsetX = 0, textOffsetY = 1,
+                textByScale = {
+                    ["0.75x"] = { fontStep = -1, labelMaxZoom = 0.82, valueMaxZoom = 0.92, textPaddingY = 1 },
+                    ["1x"] = { fontStep = -1, labelMaxZoom = 0.86, valueMaxZoom = 0.96, textPaddingY = 1 },
+                },
+            },
             fan = { x = 10, y = 104 },
             displayButton = { x = 10, y = 120 },
             knob = { x = 49, y = 90 },
         },
-        clock = { x = 108, y = 80 },
-        -- Both tiers end at x=223 at 1x, inside even the 227px red panel.
-        radioPremium = { x = 27, y = 8 },
-        radioStandard = { x = 50, y = 12 },
+        clock = { x = 106, y = 80 },
+        -- Keep the full radio UI inside even the tight red sport panel.
+        radioPremium = { x = 12, y = 13 },
+        radioStandard = { x = 14, y = 17 },
         barPad = 10,
         barFallback = 70,
+    },
+}
+
+YourDashPassengerDashboard.PAX_LAYOUTS_BY_SCALE = {
+    ["0.75x"] = {
+        heavy = {
+            door = { x = 128, y = 64 },
+            doorLED = { x = 129, y = 58 },
+            window = { x = 154, y = 52 },
+            windowDown = { x = 153, y = 52 },
+            windowUp = { x = 153, y = 52 },
+            ac = {
+                fan = { x = 17, y = 52 },
+            },
+        },
+    },
+    ["1x"] = {
+        heavy = {
+            door = { x = 170, y = 84 },
+            doorLED = { x = 172, y = 76 },
+            window = { x = 204, y = 68 },
+            windowDown = { x = 203, y = 68 },
+            windowUp = { x = 203, y = 68 },
+            ac = {
+                fan = { x = 22, y = 69 },
+            },
+        },
+    },
+    ["1.4x"] = {
+        heavy = {
+            door = { x = 239, y = 120 },
+            doorLED = { x = 241, y = 109 },
+            window = { x = 287, y = 97 },
+            windowDown = { x = 286, y = 97 },
+            windowUp = { x = 286, y = 97 },
+            ac = {
+                fan = { x = 32, y = 97 },
+            },
+        },
+    },
+    ["2x"] = {
+        heavy = {
+            door = { x = 341, y = 170 },
+            doorLED = { x = 344, y = 154 },
+            window = { x = 410, y = 138 },
+            windowDown = { x = 408, y = 138 },
+            windowUp = { x = 408, y = 138 },
+            ac = {
+                fan = { x = 45, y = 138 },
+            },
+        },
     },
 }
 
@@ -161,13 +328,70 @@ function YourDashPassengerDashboard:_paxGetLayout1x()
     return self.PAX_LAYOUTS_1X[family] or self.PAX_LAYOUTS_1X.standard
 end
 
-function YourDashPassengerDashboard:_paxSetToggleTexture(texture)
-    local button = self.paxToggleBtn
+local function paxPointXY(point)
+    if type(point) ~= "table" then return nil, nil end
+    return tonumber(point.x or point[1]), tonumber(point.y or point[2])
+end
+
+local function paxFindPoint(root, sectionName, pointName)
+    if type(root) ~= "table" then return nil end
+    if pointName == nil then
+        return root[sectionName]
+    end
+    local section = root[sectionName]
+    return section and section[pointName] or nil
+end
+
+function YourDashPassengerDashboard:_paxGetLayoutPoint(sectionName, pointName)
+    local family = self.__YourDashFamily or "standard"
+    local scaleKey = self.__YourDashScaleKey or paxScaleKey()
+    local scale = self.__YourDashScale or paxScale()
+
+    local scaleLayout = self.PAX_LAYOUTS_BY_SCALE and self.PAX_LAYOUTS_BY_SCALE[scaleKey]
+    local scaleFamily = scaleLayout and scaleLayout[family]
+    local point = paxFindPoint(scaleFamily, sectionName, pointName)
+    local x, y = paxPointXY(point)
+    if x ~= nil and y ~= nil then return x, y, point end
+
+    local layout = self.PAX_LAYOUTS_1X[family] or self.PAX_LAYOUTS_1X.standard
+    point = paxFindPoint(layout, sectionName, pointName)
+    x, y = paxPointXY(point)
+    if x == nil or y == nil then return nil, nil, point end
+    return paxScaled(x, scale), paxScaled(y, scale), point
+end
+
+function YourDashPassengerDashboard:_paxGetRadioAnchor(tier, fallbackX, fallbackY, scale, radioWidth)
+    local layout = self:_paxGetLayout1x()
+    local key = tier == "premium" and "radioPremium" or "radioStandard"
+    local point = layout and layout[key] or nil
+    local x = tonumber(point and (point.x or point[1])) or fallbackX or 0
+    local y = tonumber(point and (point.y or point[2])) or fallbackY or 0
+    scale = scale or self.__YourDashScale or paxScale()
+
+    local px = paxScaled(x, scale)
+    local py = paxScaled(y, scale)
+    local family = self.__YourDashFamily or "standard"
+    if (family == "heavy" or family == "sport") and radioWidth and radioWidth > 0 then
+        local bgW = self.backgroundTex and self.backgroundTex:getWidth() or
+            (self.__pax_bg_expanded and self.__pax_bg_expanded:getWidthOrig()) or 0
+        local rightPad = paxScaled(4, scale)
+        if bgW > 0 then
+            px = math.min(px, math.max(0, bgW - radioWidth - rightPad))
+        end
+    end
+
+    return px, py
+end
+
+function YourDashPassengerDashboard:_paxSetButtonTexture(button, texture)
     if not button or not texture then return end
     button.texture = texture
-    local scale = self.__YourDashScale or paxScale()
-    button:setWidth(paxScaled(texture:getWidthOrig(), scale))
-    button:setHeight(paxScaled(texture:getHeightOrig(), scale))
+    button:setWidth(texture:getWidthOrig())
+    button:setHeight(texture:getHeightOrig())
+end
+
+function YourDashPassengerDashboard:_paxSetToggleTexture(texture)
+    self:_paxSetButtonTexture(self.paxToggleBtn, texture)
 end
 
 function YourDashPassengerDashboard:_paxApplyTexturePack(profile, isInit)
@@ -219,15 +443,19 @@ function YourDashPassengerDashboard:_paxApplyTexturePack(profile, isInit)
     self.__pax_bg_expanded = expanded or self.__pax_bg_expanded
     self.__pax_bg_retracted = retracted or expanded or self.__pax_bg_retracted or self.__pax_bg_expanded
 
-    -- Deliberately bypass YourDash.GetTexture: only the retained 1x originals
-    -- exist, and the ISImage render scales them to the selected pack.
-    self.__pax_btn_retract = paxRawTexture(self.PAX_BTN_RETRACT)
-    self.__pax_btn_expand = paxRawTexture(self.PAX_BTN_EXPAND) or self.__pax_btn_retract
+    -- These are already authored for every scale under vehicles/buttons.
+    self.__pax_btn_retract = paxButtonTexture(self.PAX_BTN_RETRACT)
+    self.__pax_btn_expand = paxButtonTexture(self.PAX_BTN_EXPAND) or self.__pax_btn_retract
+    self.__pax_btn_move_driver = paxButtonTexture(self.PAX_BTN_MOVE_TO_DRIVER)
+    self.__pax_btn_sleep = paxButtonTexture(self.PAX_BTN_SLEEP)
 
     if family == "heavy" then
         self.__lock_off = dashTex("btn_off.png")
         self.__lock_on = dashTex("btn_on.png") or self.__lock_off
         self.__lock_partial = self.__lock_off
+        self.__paxLEDOff = dashTex("led_off.png")
+        self.__paxLEDOn = dashTex("led_on.png") or self.__paxLEDOff
+        self.__paxLEDPartial = dashTex("led_partial.png") or self.__paxLEDOff
         self.__window_switch = dashTex("window_switch.png")
         self.__window_switch_push = dashTex("window_switch_down.png") or self.__window_switch
         self.__window_switch_pull = dashTex("window_switch_up.png") or self.__window_switch
@@ -235,6 +463,7 @@ function YourDashPassengerDashboard:_paxApplyTexturePack(profile, isInit)
         self.__lock_off = dashTex("lock_off.png")
         self.__lock_on = self.__lock_off
         self.__lock_partial = self.__lock_off
+        self.__paxLEDOff, self.__paxLEDOn, self.__paxLEDPartial = nil, nil, nil
         self.__window_switch = dashTex("window_switch.png")
         self.__window_switch_push = dashTex("window_switch_down.png") or self.__window_switch
         self.__window_switch_pull = dashTex("window_switch_up.png") or self.__window_switch
@@ -242,6 +471,9 @@ function YourDashPassengerDashboard:_paxApplyTexturePack(profile, isInit)
         self.__lock_off = dashTex("lock_off.png")
         self.__lock_partial = dashTex("lock_partial.png") or self.__lock_off
         self.__lock_on = dashTex("lock_on.png") or self.__lock_off
+        self.__paxLEDOff = dashTex("led_off.png")
+        self.__paxLEDOn = dashTex("led_on.png") or self.__paxLEDOff
+        self.__paxLEDPartial = dashTex("led_partial.png") or self.__paxLEDOff
         self.__window_switch = dashTex("window_switch.png")
         self.__window_switch_push = dashTex("window_switch_push.png") or self.__window_switch
         self.__window_switch_pull = dashTex("window_switch_pull.png") or self.__window_switch
@@ -270,17 +502,36 @@ function YourDashPassengerDashboard:_paxApplyTexturePack(profile, isInit)
 
     if self.backgroundTex then self:_paxApplyBGTexture() end
     if self.paxToggleBtn then self:_paxRefreshToggleTexture() end
+    if self.paxMoveSeatBtn and self.__pax_btn_move_driver then
+        self:_paxSetButtonTexture(self.paxMoveSeatBtn, self.__pax_btn_move_driver)
+    end
+    if self.paxSleepBtn and self.__pax_btn_sleep then
+        self:_paxSetButtonTexture(self.paxSleepBtn, self.__pax_btn_sleep)
+    end
     if self.doorTex and self.__lock_off then
         self:_setImageTextureAndSize(self.doorTex, self.__lock_off)
         -- Heavy lock artwork already contains its released/pressed depth.
         self.doorTex.__pressedScale = family == "heavy" and 1.0 or 0.96
     end
-    if self.windowTex and self.__window_switch then self:_setImageTextureAndSize(self.windowTex, self.__window_switch) end
+    if self.__paxDoorLED then
+        if self.__paxLEDOff then
+            self:_setImageTextureAndSize(self.__paxDoorLED, self.__paxLEDOff)
+            self:_paxPositionDoorLED()
+        else
+            self.__paxDoorLED:setVisible(false)
+        end
+    end
+    if self.windowTex and self.__window_switch then
+        self:_setImageTextureAndSize(self.windowTex, self.__window_switch)
+        if self._paxPositionWindowSwitch then self:_paxPositionWindowSwitch() end
+    end
 
     -- These helpers retarget existing controls by family/scale; they do not
     -- recreate controls whose ISImage instances already exist.  Never invoke
     -- them from new(), before the panel and its children are instantiated.
     if self.__paxChildrenCreated then
+        self:_paxEnsureDoorLED()
+        if self._paxPositionDoorLED then self:_paxPositionDoorLED() end
         if self._ensureACControls then pcall(function() self:_ensureACControls() end) end
         if self._ensureRadioControls then pcall(function() self:_ensureRadioControls() end) end
         if self._ensureValueRadioControls then pcall(function() self:_ensureValueRadioControls() end) end
@@ -363,6 +614,20 @@ if not ISVehicleDashboard._installPressedEffect then
 			self:drawTextureScaled(self.texture, dx, dy, dw, dh, self.alpha or 1)
 		end
 	end
+end
+
+if not ISVehicleDashboard._installStaticTextureRender then
+    function ISVehicleDashboard:_installStaticTextureRender(img)
+        if not img or img.__YourDashStaticRenderInstalled then return end
+        img.__YourDashStaticRenderInstalled = true
+
+        function img:render()
+            if not self.texture then return end
+            local w, h = self.width, self.height
+            if not w or not h then return end
+            self:drawTextureScaled(self.texture, 0, 0, w, h, self.alpha or 1)
+        end
+    end
 end
 
 if not ISVehicleDashboard._getSeatWindowPart then
@@ -460,17 +725,212 @@ end
 -- =========================================================
 -- Layout helpers
 -- =========================================================
-function YourDashPassengerDashboard:_paxRelPos(ox, oy, btnW, btnH)
+function YourDashPassengerDashboard:_paxRelPos(ox, oy, btnW, btnH, options)
 	local bgW = self.backgroundTex and self.backgroundTex:getWidth() or self.width
 	local bgH = self.backgroundTex and self.backgroundTex:getHeight() or self.height
+    local bgX = self.backgroundTex and self.backgroundTex:getX() or 0
+    local bgY = self.backgroundTex and self.backgroundTex:getY() or 0
 
 	local x = ox or 0
 	local y = oy or 0
 
-	if x < 0 then x = bgW + x - (btnW or 0) end
+	if x < 0 and not (options and options.outsideLeft) then x = bgW + x - (btnW or 0) end
 	if y < 0 then y = bgH + y - (btnH or 0) end
 
-	return x, y
+	return bgX + x, bgY + y
+end
+
+function YourDashPassengerDashboard:_paxEnsureDoorLED()
+    if self.__paxDoorLED or not self.__paxLEDOff then return end
+    local led = ISImage:new(0, 0, self.__paxLEDOff:getWidthOrig(), self.__paxLEDOff:getHeightOrig(), self.__paxLEDOff)
+    led:initialise()
+    led:instantiate()
+    led.backgroundColor = { r=1, g=1, b=1, a=1 }
+    led.onclick, led.target, led.mouseovertext = nil, nil, nil
+    paxSetMouseTransparent(led)
+    led:setVisible(false)
+    self:addChild(led)
+    self.__paxDoorLED = led
+end
+
+function YourDashPassengerDashboard:_paxPositionDoorLED()
+    if not self.__paxDoorLED then return false end
+    local dx, dy = self:_paxGetLayoutPoint("doorLED")
+    if dx == nil or dy == nil then return false end
+    local x, y = self:_paxRelPos(dx, dy, self.__paxDoorLED:getWidth(), self.__paxDoorLED:getHeight())
+    self.__paxDoorLED:setX(x)
+    self.__paxDoorLED:setY(y)
+    return true
+end
+
+function YourDashPassengerDashboard:_paxUpdateDoorLED(hasBatteryPower)
+    local family = self.__YourDashFamily or "standard"
+    if self.__paxRetracted or family == "sport" or not self.__paxLEDOff then
+        if self.__paxDoorLED then self.__paxDoorLED:setVisible(false) end
+        return
+    end
+
+    self:_paxEnsureDoorLED()
+    if not self.__paxDoorLED then return end
+
+    local ledTexture = self.__paxLEDOff
+    if hasBatteryPower and self.vehicle then
+        if self.vehicle:areAllDoorsLocked() then
+            ledTexture = self.__paxLEDOn
+        elseif self.vehicle:isAnyDoorLocked() then
+            ledTexture = self.__paxLEDPartial or self.__paxLEDOff
+        end
+    end
+
+    if ledTexture and self.__paxDoorLED.texture ~= ledTexture then
+        self:_setImageTextureAndSize(self.__paxDoorLED, ledTexture)
+    end
+    local positioned = self:_paxPositionDoorLED()
+    self.__paxDoorLED:setVisible(ledTexture ~= nil and positioned == true)
+end
+
+function YourDashPassengerDashboard:_paxPositionWindowSwitch(state)
+    if not self.windowTex then return end
+    local pointName = state == "down" and "windowDown" or (state == "up" and "windowUp" or "window")
+    local wx, wy = self:_paxGetLayoutPoint(pointName)
+    if (wx == nil or wy == nil) and pointName ~= "window" then
+        wx, wy = self:_paxGetLayoutPoint("window")
+    end
+    if wx == nil or wy == nil then return end
+    local bx, by = self:_paxRelPos(wx, wy, self.windowTex:getWidth(), self.windowTex:getHeight())
+    self.windowTex:setX(bx)
+    self.windowTex:setY(by)
+end
+
+function YourDashPassengerDashboard:_paxRequestSeatSwitch(seatTo)
+    local character = self.character
+    local vehicle = (character and character.getVehicle and character:getVehicle()) or self.vehicle
+    if not character or not vehicle or not ISVehicleMenu or not ISVehicleMenu.onSwitchSeat then return end
+
+    if getGameSpeed then
+        if getGameSpeed() == 0 then return end
+        if getGameSpeed() > 1 and setGameSpeed then setGameSpeed(1) end
+    end
+
+    if not paxIsSeatInstalled(vehicle, seatTo) then return end
+    if vehicle.getCharacter and vehicle:getCharacter(seatTo) then return end
+
+    local currentSeat = vehicle.getSeat and vehicle:getSeat(character) or -1
+    if currentSeat == -1 or currentSeat == seatTo then return end
+    if vehicle.canSwitchSeat and not vehicle:canSwitchSeat(currentSeat, seatTo) then return end
+
+    if ISVehicleMenu.moveItemsFromSeat and vehicle.getPartForSeatContainer then
+        local okPart, seatPart = pcall(vehicle.getPartForSeatContainer, vehicle, seatTo)
+        local container = okPart and seatPart and seatPart.getItemContainer and seatPart:getItemContainer() or nil
+        if container and container.getCapacity and container.getCapacityWeight then
+            local minWeight = (container:getCapacity() or 0) / 4
+            local weight = container:getCapacityWeight() or 0
+            if weight > minWeight and not ISVehicleMenu.moveItemsFromSeat(character, vehicle, seatTo, true, false) then
+                return
+            end
+        end
+    end
+
+    return ISVehicleMenu.onSwitchSeat(character, seatTo)
+end
+
+function YourDashPassengerDashboard:onClickPaxMoveToDriver()
+    return self:_paxRequestSeatSwitch(0)
+end
+
+function YourDashPassengerDashboard:onClickPaxSleep()
+    local character = self.character
+    local vehicle = (character and character.getVehicle and character:getVehicle()) or self.vehicle
+    if not character or not vehicle or not ISVehicleMenu or not ISVehicleMenu.onSleep then return end
+
+    if getGameSpeed then
+        if getGameSpeed() == 0 then return end
+        if getGameSpeed() > 1 and setGameSpeed then setGameSpeed(1) end
+    end
+
+    if not paxCanSleepInVehicle(character, vehicle) then return end
+    return ISVehicleMenu.onSleep(character, vehicle)
+end
+
+function YourDashPassengerDashboard:_paxCreateSideButton(texture, onclick, tooltip)
+    if not texture then return nil end
+    local button = ISImage:new(0, 0, texture:getWidthOrig(), texture:getHeightOrig(), texture)
+    button:initialise()
+    button:instantiate()
+    button.target = self
+    button.onclick = onclick
+    button.mouseovertext = tooltip
+    button.alpha = 0.5
+    button.backgroundColor = { r=0, g=0, b=0, a=0 }
+    self:addChild(button)
+    self:_installPressedEffect(button, 0.96)
+    return button
+end
+
+function YourDashPassengerDashboard:_paxEnsureSideButtons()
+    if self.__paxSideButtonsCreated then return end
+
+    self.paxMoveSeatBtn = self:_paxCreateSideButton(
+        self.__pax_btn_move_driver or paxButtonTexture(self.PAX_BTN_MOVE_TO_DRIVER),
+        YourDashPassengerDashboard.onClickPaxMoveToDriver,
+        "move to driver seat"
+    )
+    self.paxSleepBtn = self:_paxCreateSideButton(
+        self.__pax_btn_sleep or paxButtonTexture(self.PAX_BTN_SLEEP),
+        YourDashPassengerDashboard.onClickPaxSleep,
+        paxText("ContextMenu_Sleep", "sleep")
+    )
+    self.__paxSideButtonsCreated = self.paxMoveSeatBtn ~= nil or self.paxSleepBtn ~= nil
+end
+
+function YourDashPassengerDashboard:_paxPositionSideButtons()
+    if not self.backgroundTex then return end
+    local moveButton = self.paxMoveSeatBtn
+    local sleepButton = self.paxSleepBtn
+    if not moveButton and not sleepButton then return end
+
+    local scale = self.__YourDashScale or paxScale()
+    local gap = math.max(1, paxScaled(self.PAX_SIDE_BUTTON_GAP or 2, scale))
+    local x = self.backgroundTex:getX() + self.backgroundTex:getWidth() + gap
+    local stackH = 0
+    if moveButton then stackH = stackH + moveButton:getHeight() end
+    if sleepButton then
+        if stackH > 0 then stackH = stackH + gap end
+        stackH = stackH + sleepButton:getHeight()
+    end
+    local y = math.max(self.backgroundTex:getY(),
+        self.backgroundTex:getY() + self.backgroundTex:getHeight() - stackH)
+
+    if moveButton then
+        moveButton:setX(x)
+        moveButton:setY(y)
+        y = y + moveButton:getHeight() + gap
+    end
+    if sleepButton then
+        sleepButton:setX(x)
+        sleepButton:setY(y)
+    end
+end
+
+function YourDashPassengerDashboard:_paxUpdateSideButtons()
+    self:_paxEnsureSideButtons()
+    if self.paxMoveSeatBtn then
+        self.paxMoveSeatBtn:setVisible(true)
+        self.paxMoveSeatBtn.target = self
+        self.paxMoveSeatBtn.onclick = YourDashPassengerDashboard.onClickPaxMoveToDriver
+        self.paxMoveSeatBtn.mouseovertext = "move to driver seat"
+        self.paxMoveSeatBtn.__disabled = false
+        paxUpdateHoverAlpha(self.paxMoveSeatBtn)
+    end
+    if self.paxSleepBtn then
+        local canSleep, sleepTip = paxCanSleepInVehicle(self.character, self.vehicle)
+        self.paxSleepBtn:setVisible(true)
+        self.paxSleepBtn.target = self
+        self.paxSleepBtn.onclick = canSleep and YourDashPassengerDashboard.onClickPaxSleep or nil
+        self.paxSleepBtn.mouseovertext = sleepTip or paxText("ContextMenu_Sleep", "sleep")
+        self.paxSleepBtn.__disabled = not canSleep
+        paxUpdateHoverAlpha(self.paxSleepBtn)
+    end
 end
 
 function YourDashPassengerDashboard:_paxGetBarHeight()
@@ -528,10 +988,10 @@ function YourDashPassengerDashboard:_positionACControls()
         if self._updateACTempSliderPos then self:_updateACTempSliderPos() end
     end
 
-    local fan = ac.fan
-    if self.heaterTex and fan then
-        self.heaterTex:setX(baseX + paxScaled(fan.x, scale))
-        self.heaterTex:setY(baseY + paxScaled(fan.y, scale))
+    local fanX, fanY = self:_paxGetLayoutPoint("ac", "fan")
+    if self.heaterTex and fanX and fanY then
+        self.heaterTex:setX(baseX + fanX)
+        self.heaterTex:setY(baseY + fanY)
     end
 end
 
@@ -609,13 +1069,28 @@ end
 
 local function paxDrawTwoLineACDisplay(layer, label, value, rect, scale)
     if not rect or not label or not value then return end
-    local font = YourDash.GetUIFont and YourDash.GetUIFont() or (UIFont and UIFont.Small)
+    local scaleKey = paxScaleKey()
+    local textFit = type(rect.textByScale) == "table" and rect.textByScale[scaleKey] or nil
+    if type(textFit) ~= "table" then textFit = nil end
+
+    local fontStep = textFit and textFit.fontStep
+    if fontStep == nil then fontStep = rect.fontStep end
+    local textOffsetX = textFit and textFit.textOffsetX
+    if textOffsetX == nil then textOffsetX = rect.textOffsetX end
+    local textOffsetY = textFit and textFit.textOffsetY
+    if textOffsetY == nil then textOffsetY = rect.textOffsetY end
+    local textPaddingY = textFit and textFit.textPaddingY
+    if textPaddingY == nil then textPaddingY = rect.textPaddingY end
+
+    local font = paxSteppedUIFont(fontStep)
     local x = paxScaled(rect.x, scale)
     local y = paxScaled(rect.y, scale)
     local width = paxScaled(rect.width, scale)
     local height = paxScaled(rect.height, scale)
-    local opticalOffsetX = paxScaled(rect.textOffsetX or 0, scale)
-    local fontHeight = YourDash.FontHeightForScale and YourDash.FontHeightForScale() or nil
+    local opticalOffsetX = paxScaled(textOffsetX or 0, scale)
+    local opticalOffsetY = paxScaled(textOffsetY or 0, scale)
+    local verticalPadding = math.max(0, paxScaled(textPaddingY or 0, scale))
+    local fontHeight = nil
     local labelWidth, valueWidth = nil, nil
     if getTextManager and font then
         local ok, manager = pcall(getTextManager)
@@ -648,13 +1123,15 @@ local function paxDrawTwoLineACDisplay(layer, label, value, rect, scale)
     end
 
     local availableWidth = math.max(1, width - 2)
-    local labelZoom = math.min(1.00, availableWidth / labelWidth)
-    local valueZoom = math.min(1.25, availableWidth / valueWidth)
+    local labelMaxZoom = tonumber(textFit and textFit.labelMaxZoom or rect.labelMaxZoom) or 1.00
+    local valueMaxZoom = tonumber(textFit and textFit.valueMaxZoom or rect.valueMaxZoom) or 1.25
+    local labelZoom = math.min(labelMaxZoom, availableWidth / labelWidth)
+    local valueZoom = math.min(valueMaxZoom, availableWidth / valueWidth)
     local inkTop = fontHeight * 0.25
     local inkHeight = fontHeight * 0.56
     local gap = math.max(1, paxScaled(1, scale))
     local totalInkHeight = inkHeight * (labelZoom + valueZoom)
-    local availableInkHeight = math.max(1, height - gap)
+    local availableInkHeight = math.max(1, height - gap - verticalPadding * 2)
     if totalInkHeight > availableInkHeight then
         local fit = availableInkHeight / totalInkHeight
         labelZoom, valueZoom = labelZoom * fit, valueZoom * fit
@@ -662,10 +1139,11 @@ local function paxDrawTwoLineACDisplay(layer, label, value, rect, scale)
     end
 
     local packedHeight = totalInkHeight + gap
-    local packedTop = y + (height - packedHeight) / 2
-    local labelOriginY = packedTop - inkTop * labelZoom
+    local innerHeight = math.max(1, height - verticalPadding * 2)
+    local packedTop = y + verticalPadding + (innerHeight - packedHeight) / 2
+    local labelOriginY = packedTop - inkTop * labelZoom + opticalOffsetY
     local valueInkTop = packedTop + inkHeight * labelZoom + gap
-    local valueOriginY = valueInkTop - inkTop * valueZoom
+    local valueOriginY = valueInkTop - inkTop * valueZoom + opticalOffsetY
 
     local function drawLine(text, textWidth, zoom, originY)
         if math.abs(zoom - 1) > 0.001 and layer.drawTextZoomed then
@@ -812,11 +1290,13 @@ function YourDashPassengerDashboard:_paxPositionSportExtras()
     local layout = self:_paxGetLayout1x()
     local scale = self.__YourDashScale or paxScale()
     local ac = layout.ac or {}
+    local baseX = self.backgroundTex:getX()
+    local baseY = self.backgroundTex:getY()
 
     local function position(element, point)
         if not element or not point then return end
-        element:setX(paxScaled(point.x, scale))
-        element:setY(paxScaled(point.y, scale))
+        element:setX(baseX + paxScaled(point.x, scale))
+        element:setY(baseY + paxScaled(point.y, scale))
     end
     position(self.__paxSportACBackground, ac.background)
     position(self.__paxSportFanButton, ac.fan)
@@ -825,8 +1305,8 @@ function YourDashPassengerDashboard:_paxPositionSportExtras()
     position(self.__paxSportDoorLED, layout.doorLED)
 
     if self.__paxSportOverlay then
-        self.__paxSportOverlay:setX(0)
-        self.__paxSportOverlay:setY(0)
+        self.__paxSportOverlay:setX(baseX)
+        self.__paxSportOverlay:setY(baseY)
         self.__paxSportOverlay:setWidth(self.backgroundTex:getWidth())
         self.__paxSportOverlay:setHeight(self.backgroundTex:getHeight())
     end
@@ -928,6 +1408,7 @@ end
 function YourDashPassengerDashboard:_paxHideAllExpandedControls()
 	-- Door / window
 	if self.doorTex then self.doorTex:setVisible(false) end
+    if self.__paxDoorLED then self.__paxDoorLED:setVisible(false) end
 	if self.windowTex then self.windowTex:setVisible(false) end
 
 	-- AC
@@ -1003,6 +1484,7 @@ function YourDashPassengerDashboard:createChildren()
 		self:addChild(self.paxToggleBtn)
 		self:_installPressedEffect(self.paxToggleBtn, 0.96)
 	end
+    self:_paxEnsureSideButtons()
 
 	-- Door lock button (reuse lock textures + onClickDoors)
 	if self.__lock_off then
@@ -1015,6 +1497,7 @@ function YourDashPassengerDashboard:createChildren()
 		self:_setImageEnabled(self.doorTex, true, getText("Tooltip_Dashboard_LockedDoors"), ISVehicleDashboard.onClickDoors, self)
 		self:_installPressedEffect(self.doorTex, self.__YourDashFamily == "heavy" and 1.0 or 0.96)
 	end
+    self:_paxEnsureDoorLED()
 
 	-- Window button (reuse your window logic + textures)
 	if self.__window_switch then
@@ -1024,9 +1507,9 @@ function YourDashPassengerDashboard:createChildren()
 		self.windowTex.backgroundColor = { r=0, g=0, b=0, a=0 }
 		self.windowTex.target = self
 		self.windowTex.onclick = ISVehicleDashboard.onClickWindow
+        self:_installStaticTextureRender(self.windowTex)
 		self:addChild(self.windowTex)
-
-		self:_installPressedEffect(self.windowTex, 1.0)
+        self.windowTex.__pressed = false
 
 		-- Heavy/sport switches use their upper and lower halves as explicit
 		-- close/open commands.  Standard keeps the proven toggle behaviour.
@@ -1045,15 +1528,19 @@ function YourDashPassengerDashboard:createChildren()
 				dash.__YourDashWindowCommand = state
 				local stateTexture = state == "up" and dash.__window_switch_pull or dash.__window_switch_push
 				dash:_setImageTextureAndSize(self, stateTexture or dash.__window_switch)
+                if dash and dash._paxPositionWindowSwitch then dash:_paxPositionWindowSwitch(state) end
 			elseif wp then
 				local w = wp:getWindow()
 				if w and w:isOpen() then
 					dash:_setImageTextureAndSize(self, dash.__window_switch_pull or dash.__window_switch)
+                    if dash and dash._paxPositionWindowSwitch then dash:_paxPositionWindowSwitch("up") end
 				else
 					dash:_setImageTextureAndSize(self, dash.__window_switch_push or dash.__window_switch)
+                    if dash and dash._paxPositionWindowSwitch then dash:_paxPositionWindowSwitch("down") end
 				end
 			else
 				dash:_setImageTextureAndSize(self, dash.__window_switch)
+                if dash and dash._paxPositionWindowSwitch then dash:_paxPositionWindowSwitch("neutral") end
 			end
 
 			if _down then return _down(self, x, y) end
@@ -1066,6 +1553,7 @@ function YourDashPassengerDashboard:createChildren()
 			local dash = self.target
 			if dash and dash.__window_switch then
 				dash:_setImageTextureAndSize(self, dash.__window_switch)
+                if dash._paxPositionWindowSwitch then dash:_paxPositionWindowSwitch() end
 			end
 			if self.__disabled then
 				if dash then dash.__YourDashWindowCommand = nil end
@@ -1083,6 +1571,7 @@ function YourDashPassengerDashboard:createChildren()
 			local dash = self.target
 			if dash and dash.__window_switch then
 				dash:_setImageTextureAndSize(self, dash.__window_switch)
+                if dash._paxPositionWindowSwitch then dash:_paxPositionWindowSwitch() end
 			end
 			if dash then dash.__YourDashWindowCommand = nil end
 			if _upOut then return _upOut(self, x, y) end
@@ -1157,47 +1646,61 @@ function YourDashPassengerDashboard:onResolutionChange()
 	local screenWidth  = getPlayerScreenWidth(self.playerNum)
 	local screenHeight = getPlayerScreenHeight(self.playerNum)
 
-	self:setWidth(self.backgroundTex:getWidth())
-	self:setHeight(self.backgroundTex:getHeight())
+    local TX, TY = self:_paxGetLayoutPoint("toggle")
+    local DX, DY = self:_paxGetLayoutPoint("door")
+    local leftGutter = 0
+    if (TX or 0) < 0 then leftGutter = math.ceil(-(TX or 0)) end
+    self.__paxLeftGutter = leftGutter
+
+    self:_paxEnsureSideButtons()
+    local actionGap = math.max(1, paxScaled(self.PAX_SIDE_BUTTON_GAP or 2, scale))
+    local actionW = 0
+    local actionBottom = 0
+    if self.paxMoveSeatBtn then
+        actionW = math.max(actionW, self.paxMoveSeatBtn:getWidth())
+        actionBottom = actionBottom + self.paxMoveSeatBtn:getHeight()
+    end
+    if self.paxSleepBtn then
+        actionW = math.max(actionW, self.paxSleepBtn:getWidth())
+        actionBottom = actionBottom + self.paxSleepBtn:getHeight()
+    end
+    if actionBottom > 0 then actionBottom = actionBottom + actionGap * 3 end
+    local rightGutter = actionW > 0 and (actionGap + actionW) or 0
+
+    local bgW = self.backgroundTex:getWidth()
+    local bgH = self.backgroundTex:getHeight()
+	self:setWidth(bgW + leftGutter + rightGutter)
+	self:setHeight(math.max(bgH, actionBottom))
 
 	local barH = self:_paxGetBarHeight()
     local pad  = PAD or 0
 
-    local x = screenLeft + (screenWidth - self.width) / 2 + (OFFX or 0)
-    local y = screenTop + screenHeight - self.height - barH - pad + (OFFY or 0)
-
-    local toggle = layout.toggle or {}
-    local door = layout.door or {}
-    local window = layout.window or {}
-    local TX, TY = paxScaled(toggle.x, scale), paxScaled(toggle.y, scale)
-    local DX, DY = paxScaled(door.x, scale), paxScaled(door.y, scale)
-    local WX, WY = paxScaled(window.x, scale), paxScaled(window.y, scale)
+    local x = screenLeft + (screenWidth - bgW) / 2 - leftGutter + (OFFX or 0)
+    local y = screenTop + screenHeight - bgH - barH - pad + (OFFY or 0)
 
 	self:setX(x)
 	self:setY(y)
 
 	-- background local origin
-	self.backgroundTex:setX(0)
+	self.backgroundTex:setX(leftGutter)
 	self.backgroundTex:setY(0)
 
 	-- Toggle button
     if self.paxToggleBtn then
-        local bx, by = self:_paxRelPos(TX or 0, TY or 0, self.paxToggleBtn:getWidth(), self.paxToggleBtn:getHeight())
+        local bx, by = self:_paxRelPos(TX or 0, TY or 0, self.paxToggleBtn:getWidth(), self.paxToggleBtn:getHeight(), { outsideLeft = true })
         self.paxToggleBtn:setX(bx)
         self.paxToggleBtn:setY(by)
     end
+    self:_paxPositionSideButtons()
 
     if self.doorTex then
         local bx, by = self:_paxRelPos(DX or 0, DY or 0, self.doorTex:getWidth(), self.doorTex:getHeight())
         self.doorTex:setX(bx)
         self.doorTex:setY(by)
     end
+    self:_paxPositionDoorLED()
 
-    if self.windowTex then
-        local bx, by = self:_paxRelPos(WX or 0, WY or 0, self.windowTex:getWidth(), self.windowTex:getHeight())
-        self.windowTex:setX(bx)
-        self.windowTex:setY(by)
-    end
+    self:_paxPositionWindowSwitch()
 
 	-- Passenger-family AC positions.
 	if self._positionACControls then pcall(function() self:_positionACControls() end) end
@@ -1245,6 +1748,8 @@ function YourDashPassengerDashboard:prerender()
 	end
 
 	self:_paxRefreshToggleTexture()
+    self:_paxUpdateSideButtons()
+    self:_paxPositionSideButtons()
 
 	-- Retracted: show only background + toggle
 	if self.__paxRetracted then
@@ -1273,6 +1778,7 @@ function YourDashPassengerDashboard:prerender()
 		self.doorTex.backgroundColor = { r=0, g=0, b=0, a=0 }
 		self.doorTex:setVisible(true)
 	end
+    self:_paxUpdateDoorLED(hasPower)
 
 	-- Window button: only if window exists for this seat
 	if self.windowTex then
@@ -1301,6 +1807,7 @@ function YourDashPassengerDashboard:prerender()
 			if self.windowTex.texture ~= self.__window_switch then
 				self:_setImageTextureAndSize(self.windowTex, self.__window_switch)
 			end
+            self:_paxPositionWindowSwitch()
 		end
 	end
 

@@ -589,7 +589,7 @@ local DEFAULT_LAYOUTS_1X = {
         },
         controls = {
             speedreg = { x = 388, y = 127 },
-            gear = { x = 170, y = 126 },
+            gear = { x = 176, y = 128 },
             engine = { x = 208, y = 68 },
             battery = { x = 234, y = 68 },
             lights = { x = 66, y = 130 },
@@ -638,12 +638,12 @@ local DEFAULT_LAYOUTS_1X = {
             door = { x = 426, y = 139 }, light = { x = 461, y = 139 },
         },
         controls = {
-            speedreg = { x = 323, y = 130 }, gear = { x = 293, y = 136 },
+            speedreg = { x = 323, y = 130 }, gear = { x = 299, y = 136 },
             door = { x = 13, y = 90 }, trunk = { x = 52, y = 90 },
-            doorLED = { x = 14, y = 82 }, trunkLED = { x = 54, y = 82 },
-            window = { x = 8, y = 132 }, windowDown = { x = 8, y = 131 }, windowUp = { x = 7, y = 133 },
+            doorLED = { x = 15, y = 82 }, trunkLED = { x = 54, y = 82 },
+            window = { x = 8, y = 132 }, windowDown = { x = 8, y = 132 }, windowUp = { x = 8, y = 132 },
             lights = { x = 11, y = 106 },
-            ignition = { x = 535, y = 136 },
+            ignition = { x = 526, y = 136 },
             fuelArrowLeft = { x = 414, y = 55 }, fuelArrowRight = { x = 483, y = 55 },
             fuelArrow = { x = 414, y = 55 },
         },
@@ -673,40 +673,112 @@ local DEFAULT_LAYOUTS_1X = {
             brake = { x = 463, y = 162 }, battery = { x = 489, y = 162 },
         },
         controls = {
-            speedreg = { x = 198, y = 162 }, gear = { x = 280, y = 144 },
-            door = { x = 31, y = 69 }, trunk = { x = 66, y = 69 },
-            doorLED = { x = 36, y = 104 }, trunkLED = { x = 71, y = 104 },
+            speedreg = { x = 198, y = 162 }, gear = { x = 166, y = 115 },
+            door = { x = 30, y = 69 }, trunk = { x = 65, y = 69 },
+            doorLED = { x = 35, y = 104 }, trunkLED = { x = 70, y = 104 },
             window = { x = 11, y = 115 }, windowDown = { x = 11, y = 113 }, windowUp = { x = 11, y = 117 },
-            lights = { x = 62, y = 128 },
-            ignition = { x = 557, y = 129 },
+            lights = { x = 61, y = 128 },
+            ignition = { x = 546, y = 129 },
             fuelArrowLeft = { x = 433, y = 134 }, fuelArrowRight = { x = 437, y = 119 },
             fuelArrow = { x = 433, y = 134 }, gaugeDisplayButton = { x = 385, y = 139 },
         },
         ac = {
-            background = { x = 592, y = 116 }, display = { x = 599, y = 119, width = 31, height = 23, textOffsetX = 2 },
-            fan = { x = 601, y = 143 }, displayButton = { x = 601, y = 159 },
-            knob = { x = 640, y = 129 },
+            background = { x = 592, y = 117 },
+            display = {
+                x = 599, y = 120, width = 31, height = 23, textOffsetX = 0, textOffsetY = 1,
+                textByScale = {
+                    ["0.75x"] = { fontStep = -1, labelMaxZoom = 0.82, valueMaxZoom = 0.92, textPaddingY = 1 },
+                    ["1x"] = { fontStep = -1, labelMaxZoom = 0.86, valueMaxZoom = 0.96, textPaddingY = 1 },
+                },
+            },
+            fan = { x = 601, y = 144 }, displayButton = { x = 601, y = 160 },
+            knob = { x = 640, y = 130 },
         },
         radio = { standard = { x = 557, y = 60 }, premium = { x = 546, y = 55 } },
         radioStandard = { x = 557, y = 60 },
         radioPremium = { x = 546, y = 55 },
-        displays = { main = { x = 280, y = 139, width = 68, height = 25, textOffsetX = 2 } },
+        displays = { main = { x = 280, y = 139, width = 68, height = 25, textOffsetX = 0, textOffsetY = 1, fontStep = -1, valueMaxZoom = 1.0 } },
         clock = { background = { x = 699, y = 119 }, pivot = { x = 727, y = 147 } },
         passenger = {},
     },
 }
 
+-- Coordinates in this table are authored in final pixels for the named scale.
+-- Missing points fall back to DEFAULT_LAYOUTS_1X and are scaled normally.
+local DEFAULT_LAYOUTS_BY_SCALE = {
+    ["0.75x"] = {
+        standard = {
+            controls = {
+                gear = { x = 131, y = 93 },
+            },
+        },
+        heavy = {
+            controls = {
+                door = { x = 10, y = 68 },
+                gear = { x = 223, y = 99 },
+                window = { x = 7, y = 100 },
+            },
+            ac = {
+                fan = { x = 444, y = 96 },
+            },
+        },
+        sport = {
+            controls = {
+                gear = { x = 123, y = 83 },
+            },
+        },
+    },
+    ["1x"] = {},
+    ["1.4x"] = {
+        standard = {
+            controls = {
+                gear = { x = 247, y = 178 },
+            },
+        },
+        heavy = {
+            controls = {
+                door = { x = 19, y = 126 },
+                trunkBlank = { x = 74, y = 126 },
+                window = { x = 12, y = 186 },
+            },
+            ac = {
+                fan = { x = 827, y = 179 },
+            },
+        },
+        sport = {
+            controls = {
+                gear = { x = 232, y = 159 },
+            },
+        },
+    },
+    ["2x"] = {
+        standard = {
+            controls = {
+                gear = { x = 353, y = 256 },
+            },
+        },
+        heavy = {
+            controls = {
+                door = { x = 27, y = 180 },
+                trunkBlank = { x = 105, y = 180 },
+                window = { x = 17, y = 265 },
+            },
+            ac = {
+                fan = { x = 1181, y = 256 },
+            },
+        },
+    },
+}
+
 YD.Layouts1x = fillMissing(YD.Layouts1x or {}, DEFAULT_LAYOUTS_1X)
+YD.LayoutsByScale = fillMissing(YD.LayoutsByScale or {}, DEFAULT_LAYOUTS_BY_SCALE)
 
 function YD.GetLayout1x(family)
     family = YD.NormalizeFamily(family) or "standard"
     return YD.Layouts1x[family] or YD.Layouts1x.standard
 end
 
--- Accept either a family name/mechanic type or a dashboard-like object.  The
--- returned table remains authored at 1x; callers decide which coordinates to
--- scale, avoiding accidental double-scaling of dimensions.
-function YD.GetLayout(subject)
+local function layoutFamily(subject)
     local family = subject
     if type(subject) ~= "string" and type(subject) ~= "number" then
         local ok, value = pcall(function()
@@ -729,15 +801,39 @@ function YD.GetLayout(subject)
             end
         end
     end
-    return YD.GetLayout1x(family)
+    return YD.NormalizeFamily(family) or "standard"
 end
 
-function YD.GetLayoutPoint(family, sectionName, pointName, sizeIndexOrKey)
+local function pointXY(point)
+    if type(point) ~= "table" then return nil, nil end
+    return tonumber(point.x or point[1]), tonumber(point.y or point[2])
+end
+
+-- Accept either a family name/mechanic type or a dashboard-like object.  The
+-- returned table remains authored at 1x; callers decide which coordinates to
+-- scale, avoiding accidental double-scaling of dimensions.
+function YD.GetLayout(subject)
+    return YD.GetLayout1x(layoutFamily(subject))
+end
+
+function YD.GetLayoutPoint(subject, sectionName, pointName, sizeIndexOrKey)
+    local family = layoutFamily(subject)
+    local scaleKey = YD.ScaleKey(sizeIndexOrKey)
+    local scaleLayout = YD.LayoutsByScale and YD.LayoutsByScale[scaleKey]
+    local scaleFamily = scaleLayout and scaleLayout[family]
+    local scaleSection = scaleFamily and scaleFamily[sectionName]
+    local scalePoint = scaleSection and scaleSection[pointName]
+    local x, y = pointXY(scalePoint)
+    if x ~= nil and y ~= nil then return x, y, scalePoint end
+
     local layout = YD.GetLayout1x(family)
     local section = layout and layout[sectionName]
     local point = section and section[pointName]
     if not point then return nil, nil end
-    return YD.ScaledPoint(point.x or 0, point.y or 0, sizeIndexOrKey)
+    x, y = pointXY(point)
+    if x == nil or y == nil then return nil, nil end
+    local scaledX, scaledY = YD.ScaledPoint(x, y, sizeIndexOrKey)
+    return scaledX, scaledY, point
 end
 
 -- -------------------------------------------------------------------------

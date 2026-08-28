@@ -50,7 +50,11 @@ local function scaled(value)
     return math.floor((value or 0) * scale + 0.5)
 end
 
-local function point(section, name, fallbackX, fallbackY)
+local function point(dashboard, sectionName, section, name, fallbackX, fallbackY)
+    if YourDash.GetLayoutPoint then
+        local x, y = YourDash.GetLayoutPoint(dashboard, sectionName, name)
+        if x ~= nil and y ~= nil then return x, y, section and section[name] or nil end
+    end
     local value = section and section[name] or nil
     return scaled(value and (value.x or value[1]) or fallbackX),
         scaled(value and (value.y or value[2]) or fallbackY), value
@@ -224,9 +228,9 @@ function ISVehicleDashboard:_positionACControls()
 
     local layout = YourDash.GetLayout and YourDash.GetLayout(self) or nil
     local ac = layout and layout.ac or {}
-    local sliderX, sliderY, slider = point(ac, "slider", 624, 131)
-    local fanX, fanY = point(ac, "fan", 592, 127)
-    local bgX, bgY = point(ac, "background", 0, 0)
+    local sliderX, sliderY, slider = point(self, "ac", ac, "slider", 624, 131)
+    local fanX, fanY = point(self, "ac", ac, "fan", 592, 127)
+    local bgX, bgY = point(self, "ac", ac, "background", 0, 0)
     local travel = scaled(slider and slider.travel or 88)
     local baseX, baseY = self.backgroundTex:getX(), self.backgroundTex:getY()
 

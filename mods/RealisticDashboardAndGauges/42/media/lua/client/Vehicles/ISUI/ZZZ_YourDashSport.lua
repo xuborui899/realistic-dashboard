@@ -30,11 +30,14 @@ local AC_MODE_SET = 3
 local AC_MODE_COUNT = 3
 
 local AC_RAW_LEVELS = { -25, -15, -8, 0, 8, 15, 25 }
-local AC_SETPOINTS_C = { 16, 18, 20, 22, 24, 26, 28 }
+local AC_RELATIVE_LEVELS = { -3, -2, -1, 0, 1, 2, 3 }
 local MPG_KM_PER_LITRE_TO_US = 2.352145833
-local INSTANT_MPG_WINDOW_SECONDS = 15.0
-local TELEPORT_STEP_LIMIT_SQUARES = 25.0
+local SPORT_FAST_REFRESH_SECONDS = 0.5
+local SPORT_AVERAGE_REFRESH_SECONDS = 2.5
+local SPORT_TRIP_STATE_VERSION = 3
 local DEGREE_SYMBOL = "\194\176"
+local SPORT_VEHICLE_STATES = ISVehicleDashboard.__YourDashSportVehicleStates or {}
+ISVehicleDashboard.__YourDashSportVehicleStates = SPORT_VEHICLE_STATES
 
 local function clamp(value, low, high)
     value = tonumber(value) or low
@@ -64,6 +67,24 @@ local function safeCall(object, methodName, ...)
     return value
 end
 
+local function vehicleStateKey(vehicle)
+    if not vehicle then return nil end
+
+    local id = safeCall(vehicle, "getId")
+    if id ~= nil then return "id:" .. tostring(id) end
+
+    local sqlId = safeCall(vehicle, "getSqlId")
+    if sqlId ~= nil then return "sql:" .. tostring(sqlId) end
+
+    return "object:" .. tostring(vehicle)
+end
+
+local function isVehicleEngineRunning(vehicle)
+    local running = safeCall(vehicle, "isEngineRunning")
+    if running == nil then return nil end
+    return running == true
+end
+
 local function currentScale()
     return YourDash.GetScale and YourDash.GetScale() or 1
 end
@@ -71,6 +92,17 @@ end
 local function scaled(value)
     if YourDash.ScaledCoord then return YourDash.ScaledCoord(value) end
     return roundNearest((tonumber(value) or 0) * currentScale())
+end
+
+local function steppedUIFont(step)
+    local base = YourDash.GetUIFont and YourDash.GetUIFont() or (UIFont and UIFont.Small)
+    step = tonumber(step) or 0
+    if step >= 0 or not UIFont then return base end
+
+    local scaleKey = YourDash.GetScaleKey and YourDash.GetScaleKey() or "1x"
+    if scaleKey == "2x" then return UIFont.Medium or UIFont.Small or UIFont.NewSmall or base end
+    if scaleKey == "1.4x" then return UIFont.Small or UIFont.NewSmall or base end
+    return UIFont.NewSmall or UIFont.Small or base
 end
 
 local function actualTextureSize(texture)
@@ -114,9 +146,125 @@ local function nearestLevelIndex(rawTemperature)
     return bestIndex
 end
 
-local function getFuelAmount(vehicle)
-    local tank = vehicle and safeCall(vehicle, "getPartById", "GasTank") or nil
-    return finiteNumber(tank and safeCall(tank, "getContainerContentAmount") or nil)
+local function relativeLevelLabel(index)
+    local value = tonumber(AC_RELATIVE_LEVELS[index]) or 0
+    if value > 0 then return "+" .. tostring(value) end
+    return tostring(value)
+end
+
+local function getGameTimeInstance()
+    local gameTime = nil
+    if getGameTime then
+        local ok, value = pcall(getGameTime)
+        if ok then gameTime = value end
+    end
+    if not gameTime and GameTime and GameTime.getInstance then
+        local ok, value = pcall(GameTime.getInstance)
+        if ok then gameTime = value end
+    end
+    return gameTime
+end
+
+local function getElapsedGameMinutes(dt)
+    dt = finiteNumber(dt) or 0
+    if dt <= 0 then return 0 end
+
+    local gameTime = getGameTimeInstance()
+    local minutesPerDay = finiteNumber(gameTime and safeCall(gameTime, "getMinutesPerDay") or nil) or 60
+    if minutesPerDay <= 0 then minutesPerDay = 60 end
+
+    local multiplier = finiteNumber(gameTime and safeCall(gameTime, "getTrueMultiplier") or nil)
+    if multiplier == nil then
+        multiplier = finiteNumber(gameTime and safeCall(gameTime, "getMultiplier") or nil) or 1
+    end
+    multiplier = math.max(0, multiplier)
+
+    return dt * multiplier * (1440 / (minutesPerDay * 60))
+end
+
+-- Mirror vanilla Vehicles.Update.GasTank without SandboxVars.CarGasConsumption.
+-- The dashboard applies its own normalization so MPG stays comparable across
+-- different vehicle-fuel-consumption sandbox settings.
+local function estimateFuelPerGameMinuteAtOneMultiplier(vehicle)
+    if not vehicle or safeCall(vehicle, "isEngineRunning") ~= true then return 0 end
+
+    local speedKph = finiteNumber(safeCall(vehicle, "getCurrentSpeedKmHour")) or 0
+    local movingSpeedKph = math.abs(speedKph)
+    local engineSpeed = finiteNumber(safeCall(vehicle, "getEngineSpeed")) or 0
+    if engineSpeed <= 0 then return nil end
+
+    local script = safeCall(vehicle, "getScript")
+    local maxSpeed = finiteNumber(safeCall(vehicle, "getMaxSpeed")) or
+        finiteNumber(script and safeCall(script, "getMaxSpeed")) or 120
+    local gearCount = finiteNumber(script and safeCall(script, "getGearRatioCount")) or 1
+    local transmission = finiteNumber(safeCall(vehicle, "getTransmissionNumber")) or 1
+    local engineQuality = finiteNumber(safeCall(vehicle, "getEngineQuality")) or 100
+    local mass = finiteNumber(script and safeCall(script, "getMass")) or 1000
+
+    gearCount = math.max(1, gearCount)
+    transmission = math.max(1, math.abs(transmission))
+    engineQuality = clamp(engineQuality, 0, 100)
+
+    local gasMultiplier = 90000
+    local heater = safeCall(vehicle, "getHeater")
+    local heaterData = heater and safeCall(heater, "getModData") or nil
+    if heaterData and heaterData.active then
+        gasMultiplier = gasMultiplier - 5000
+    end
+
+    local qualityMultiplier = ((100 - engineQuality) / 200) + 1
+    local massMultiplier = ((math.abs(1000 - mass)) / 300) + 1
+    local speedToNextTransmission = ((maxSpeed / gearCount) * 0.71) * transmission
+    local speedMultiplier = (speedToNextTransmission - movingSpeedKph) * 350
+
+    if math.floor(movingSpeedKph) > 0 then
+        gasMultiplier = gasMultiplier / qualityMultiplier / massMultiplier
+    else
+        gasMultiplier = (gasMultiplier / qualityMultiplier) * 2
+        speedMultiplier = 1
+    end
+    if speedMultiplier < 800 and speedMultiplier ~= 1 then
+        speedMultiplier = 800
+    end
+    if speedMultiplier == 1 then
+        speedMultiplier = 300
+    end
+
+    local fuelPerMinute = (speedMultiplier / gasMultiplier) * (engineSpeed / 2500.0)
+    return (fuelPerMinute and fuelPerMinute > 0) and fuelPerMinute or nil
+end
+
+local function estimateCurrentMpgAtOneMultiplier(vehicle)
+    if not vehicle or safeCall(vehicle, "isEngineRunning") ~= true then return 0 end
+
+    local speedKph = math.abs(finiteNumber(safeCall(vehicle, "getCurrentSpeedKmHour")) or 0)
+    if speedKph < 0.5 then return 0 end
+
+    local gameMinutesPerRealSecond = getElapsedGameMinutes(1)
+    if not gameMinutesPerRealSecond or gameMinutesPerRealSecond <= 0 then return nil end
+
+    local fuelPerGameMinute = estimateFuelPerGameMinuteAtOneMultiplier(vehicle)
+    if not fuelPerGameMinute or fuelPerGameMinute <= 0 then return nil end
+
+    local kmPerGameMinute = (speedKph / 3600) / gameMinutesPerRealSecond
+    return clamp((kmPerGameMinute / fuelPerGameMinute) * MPG_KM_PER_LITRE_TO_US, 0, 99.9)
+end
+
+local function estimateFuelLitresAtOneMultiplier(vehicle, dt)
+    local elapsedGameMinutes = getElapsedGameMinutes(dt)
+    if elapsedGameMinutes <= 0 then return 0 end
+
+    local fuelPerGameMinute = estimateFuelPerGameMinuteAtOneMultiplier(vehicle)
+    if not fuelPerGameMinute or fuelPerGameMinute <= 0 then return 0 end
+
+    return fuelPerGameMinute * elapsedGameMinutes
+end
+
+local function estimateDistanceKm(vehicle, dt)
+    local speedKph = math.abs(finiteNumber(safeCall(vehicle, "getCurrentSpeedKmHour")) or 0)
+    if speedKph < 0.5 then return 0 end
+
+    return speedKph * ((finiteNumber(dt) or 0) / 3600)
 end
 
 local function getEngineCondition(vehicle)
@@ -225,124 +373,121 @@ local function makeImage(dashboard, texture)
     return image
 end
 
+local function newSportCache()
+    return {
+        fastAge = SPORT_FAST_REFRESH_SECONDS,
+        averageAge = SPORT_AVERAGE_REFRESH_SECONDS,
+        instantMpg = 0,
+        averageMpg = 0,
+    }
+end
+
+local function resetDisplayState(state)
+    state.mainMode = MAIN_MODE_MPH
+    state.acMode = AC_MODE_INSIDE
+    state.cache = newSportCache()
+end
+
 local function resetTripState(state, vehicle)
+    state.version = SPORT_TRIP_STATE_VERSION
+    state.resetSerial = (state.resetSerial or 0) + 1
     state.distanceKm = 0
     state.fuelLitres = 0
-    state.instantDistanceKm = 0
-    state.instantFuelLitres = 0
-    state.pendingInstantDistanceKm = 0
-    state.samples = {}
-    state.clock = 0
-    state.lastX = finiteNumber(vehicle and safeCall(vehicle, "getX") or nil)
-    state.lastY = finiteNumber(vehicle and safeCall(vehicle, "getY") or nil)
-    state.lastFuel = getFuelAmount(vehicle)
     state.justReset = true
 end
 
-local function newTripState(vehicle)
+local function newTripState(vehicle, key)
     local state = {
+        key = key,
         vehicle = vehicle,
-        engineWasRunning = false,
+        engineWasRunning = isVehicleEngineRunning(vehicle) == true,
         distanceKm = 0,
         fuelLitres = 0,
-        instantDistanceKm = 0,
-        instantFuelLitres = 0,
-        pendingInstantDistanceKm = 0,
-        samples = {},
-        clock = 0,
-        lastX = nil,
-        lastY = nil,
-        lastFuel = nil,
     }
     resetTripState(state, vehicle)
+    resetDisplayState(state)
     return state
 end
 
-local function pruneInstantSamples(state)
-    local cutoff = state.clock - INSTANT_MPG_WINDOW_SECONDS
-    while #state.samples > 0 and state.samples[1].time < cutoff do
-        local sample = table.remove(state.samples, 1)
-        state.instantDistanceKm = math.max(0, state.instantDistanceKm - sample.distanceKm)
-        state.instantFuelLitres = math.max(0, state.instantFuelLitres - sample.fuelLitres)
+local function getTripStateForVehicle(vehicle)
+    local key = vehicleStateKey(vehicle)
+    if not key then return nil, false end
+
+    local state = SPORT_VEHICLE_STATES[key]
+    local created = false
+    if not state or state.version ~= SPORT_TRIP_STATE_VERSION then
+        state = newTripState(vehicle, key)
+        SPORT_VEHICLE_STATES[key] = state
+        created = true
+    else
+        state.vehicle = vehicle
     end
+    return state, created
+end
+
+local function attachSportState(dashboard, vehicle)
+    local state = getTripStateForVehicle(vehicle)
+    if not state then return nil end
+
+    dashboard.__YourDashSportTrip = state
+    dashboard.__YourDashSportCache = state.cache or newSportCache()
+    state.cache = dashboard.__YourDashSportCache
+    dashboard.__YourDashSportMainMode = state.mainMode or MAIN_MODE_MPH
+    dashboard.__YourDashSportACMode = state.acMode or AC_MODE_INSIDE
+    dashboard.__YourDashSportResetSerial = state.resetSerial or 0
+    return state
+end
+
+local function persistSportModes(dashboard)
+    local state = dashboard and dashboard.__YourDashSportTrip or nil
+    if not state then return end
+
+    state.mainMode = dashboard.__YourDashSportMainMode or MAIN_MODE_MPH
+    state.acMode = dashboard.__YourDashSportACMode or AC_MODE_INSIDE
 end
 
 local function updateTripState(dashboard, dt)
     local vehicle = dashboard.vehicle
-    local state = dashboard.__YourDashSportTrip
-    local created = false
-    if not state or state.vehicle ~= vehicle then
-        state = newTripState(vehicle)
-        dashboard.__YourDashSportTrip = state
-        created = true
+    local state, created = getTripStateForVehicle(vehicle)
+    if not state then return nil end
+
+    dashboard.__YourDashSportTrip = state
+    state.cache = state.cache or dashboard.__YourDashSportCache or newSportCache()
+    dashboard.__YourDashSportCache = state.cache
+    state.justReset = created or dashboard.__YourDashSportResetSerial ~= (state.resetSerial or 0)
+    if state.justReset then
+        dashboard.__YourDashSportMainMode = state.mainMode or MAIN_MODE_MPH
+        dashboard.__YourDashSportACMode = state.acMode or AC_MODE_INSIDE
+        dashboard.__YourDashSportResetSerial = state.resetSerial or 0
     end
-    state.justReset = created
     if not vehicle then return state end
 
-    dt = clamp(dt or 0, 0, 0.25)
-    state.clock = state.clock + dt
-    local running = safeCall(vehicle, "isEngineRunning") == true
-    local x = finiteNumber(safeCall(vehicle, "getX"))
-    local y = finiteNumber(safeCall(vehicle, "getY"))
-    local fuel = getFuelAmount(vehicle)
+    dt = clamp(finiteNumber(dt) or 0, 0, 0.25)
+    local running = isVehicleEngineRunning(vehicle)
+    if running == nil then return state end
 
-    if running and not state.engineWasRunning then
+    if state.engineWasRunning and not running then
         resetTripState(state, vehicle)
-        state.clock = state.clock + dt
-        x, y, fuel = state.lastX, state.lastY, state.lastFuel
+        resetDisplayState(state)
+        dashboard.__YourDashSportCache = state.cache
+        dashboard.__YourDashSportMainMode = state.mainMode
+        dashboard.__YourDashSportACMode = state.acMode
+        dashboard.__YourDashSportResetSerial = state.resetSerial or 0
     elseif running then
-        local distanceKm = 0
-        if x and y and state.lastX and state.lastY then
-            local dx, dy = x - state.lastX, y - state.lastY
-            local distanceSquares = math.sqrt(dx * dx + dy * dy)
-            if distanceSquares <= TELEPORT_STEP_LIMIT_SQUARES then
-                -- Matches B42's own ISVehicleRoadtripDebug conversion.
-                distanceKm = distanceSquares / 100
-            end
-        end
-
-        local fuelLitres = 0
-        if fuel and state.lastFuel and state.lastFuel > fuel then
-            fuelLitres = state.lastFuel - fuel
-        elseif fuel and state.lastFuel and fuel > state.lastFuel then
-            -- Refuelling never counts as negative consumption.  It also starts
-            -- a fresh instant-measurement interval so pre-fill distance is not
-            -- paired with a later post-fill tank decrement.
-            state.pendingInstantDistanceKm = 0
-        end
+        local distanceKm = estimateDistanceKm(vehicle, dt)
+        local fuelLitres = estimateFuelLitresAtOneMultiplier(vehicle, dt)
 
         state.distanceKm = state.distanceKm + distanceKm
         state.fuelLitres = state.fuelLitres + fuelLitres
-        state.pendingInstantDistanceKm = (state.pendingInstantDistanceKm or 0) + distanceKm
-        -- B42 replicates tank amounts in discrete steps.  Commit distance only
-        -- when its matching positive fuel decrement arrives; otherwise merely
-        -- hold the last valid instant MPG instead of letting zero-fuel frames
-        -- inflate the rolling ratio.
-        if fuelLitres > 0 then
-            local pairedDistanceKm = state.pendingInstantDistanceKm or 0
-            table.insert(state.samples, {
-                time = state.clock,
-                distanceKm = pairedDistanceKm,
-                fuelLitres = fuelLitres,
-            })
-            state.instantDistanceKm = state.instantDistanceKm + pairedDistanceKm
-            state.instantFuelLitres = state.instantFuelLitres + fuelLitres
-            state.pendingInstantDistanceKm = 0
-        end
     end
 
     state.engineWasRunning = running
-    state.lastX, state.lastY, state.lastFuel = x, y, fuel
-    pruneInstantSamples(state)
     return state
 end
 
 local function mpgFrom(distanceKm, fuelLitres)
     distanceKm = math.max(0, tonumber(distanceKm) or 0)
     fuelLitres = math.max(0, tonumber(fuelLitres) or 0)
-    -- Fuel replication is quantized, especially in multiplayer.  Returning no
-    -- sample here lets the display hold its last valid value instead of jumping
-    -- to 99.9 between discrete tank updates.
     if fuelLitres <= 0.000001 then return nil end
     if distanceKm <= 0.000001 then return 0 end
     return clamp(distanceKm / fuelLitres * MPG_KM_PER_LITRE_TO_US, 0, 99.9)
@@ -350,10 +495,12 @@ end
 
 function ISVehicleDashboard:_YourDashSportRefreshCaches(dt)
     local state = updateTripState(self, dt)
+    if not state then return end
     local cache = self.__YourDashSportCache
     if not cache then
-        cache = { fastAge = 0.5, averageAge = 2.5, instantMpg = 0, averageMpg = 0 }
+        cache = state.cache or newSportCache()
         self.__YourDashSportCache = cache
+        state.cache = cache
     end
     if state.justReset then
         cache.instantMpg, cache.averageMpg = 0, 0
@@ -361,18 +508,23 @@ function ISVehicleDashboard:_YourDashSportRefreshCaches(dt)
     cache.fastAge = (cache.fastAge or 0) + dt
     cache.averageAge = (cache.averageAge or 0) + dt
 
-    if cache.fastAge >= 0.5 then
-        cache.fastAge = cache.fastAge - 0.5
+    if cache.fastAge >= SPORT_FAST_REFRESH_SECONDS then
+        cache.fastAge = cache.fastAge - SPORT_FAST_REFRESH_SECONDS
         local kph = math.abs(finiteNumber(safeCall(self.vehicle, "getCurrentSpeedKmHour")) or 0)
         cache.kph = clamp(kph, 0, 199)
         cache.mph = clamp(kph * 0.621371192237, 0, 199)
-        local instantMpg = mpgFrom(state.instantDistanceKm, state.instantFuelLitres)
-        if instantMpg ~= nil then cache.instantMpg = instantMpg end
+        if safeCall(self.vehicle, "isEngineRunning") == true then
+            local instantMpg = estimateCurrentMpgAtOneMultiplier(self.vehicle)
+            if instantMpg ~= nil then cache.instantMpg = instantMpg end
+        else
+            cache.instantMpg = 0
+        end
         cache.engineCondition = getEngineCondition(self.vehicle)
     end
-    if cache.averageAge >= 2.5 then
-        cache.averageAge = cache.averageAge - 2.5
-        local averageMpg = mpgFrom(state.distanceKm, state.fuelLitres)
+    if cache.averageAge >= SPORT_AVERAGE_REFRESH_SECONDS then
+        cache.averageAge = cache.averageAge - SPORT_AVERAGE_REFRESH_SECONDS
+        local averageFuelLitres = state.fuelLitres or 0
+        local averageMpg = mpgFrom(state.distanceKm, averageFuelLitres)
         if averageMpg ~= nil then cache.averageMpg = averageMpg end
     end
 end
@@ -411,7 +563,7 @@ function ISVehicleDashboard:_YourDashSportACRows()
     elseif mode == AC_MODE_SET then
         local _, _, raw = getHeaterState(self.vehicle)
         local index = nearestLevelIndex(raw)
-        label, celsius = "SET", AC_SETPOINTS_C[index]
+        return "SET", relativeLevelLabel(index)
     else
         label, celsius = "IN", getInsideTemperature(self)
     end
@@ -488,11 +640,26 @@ end
 
 local function drawTwoLineDisplay(layer, label, value, rect, red, green, blue)
     if not layer or not rect or not label or not value then return end
-    local font = YourDash.GetUIFont and YourDash.GetUIFont() or (UIFont and UIFont.Small)
+    local scaleKey = YourDash.GetScaleKey and YourDash.GetScaleKey() or "1x"
+    local textFit = type(rect.textByScale) == "table" and rect.textByScale[scaleKey] or nil
+    if type(textFit) ~= "table" then textFit = nil end
+
+    local fontStep = textFit and textFit.fontStep
+    if fontStep == nil then fontStep = rect.fontStep end
+    local textOffsetX = textFit and textFit.textOffsetX
+    if textOffsetX == nil then textOffsetX = rect.textOffsetX end
+    local textOffsetY = textFit and textFit.textOffsetY
+    if textOffsetY == nil then textOffsetY = rect.textOffsetY end
+    local textPaddingY = textFit and textFit.textPaddingY
+    if textPaddingY == nil then textPaddingY = rect.textPaddingY end
+
+    local font = steppedUIFont(fontStep)
     local x, y = scaled(rect.x or 0), scaled(rect.y or 0)
     local width, height = scaled(rect.width or 0), scaled(rect.height or 0)
-    local opticalOffsetX = scaled(rect.textOffsetX or 0)
-    local fontHeight = YourDash.FontHeightForScale and YourDash.FontHeightForScale() or nil
+    local opticalOffsetX = scaled(textOffsetX or 0)
+    local opticalOffsetY = scaled(textOffsetY or 0)
+    local verticalPadding = math.max(0, scaled(textPaddingY or 0))
+    local fontHeight = nil
     local labelWidth, valueWidth = nil, nil
     if getTextManager and font then
         local ok, manager = pcall(getTextManager)
@@ -524,8 +691,10 @@ local function drawTwoLineDisplay(layer, label, value, rect, red, green, blue)
     end
 
     local availableWidth = math.max(1, width - 2)
-    local labelZoom = math.min(LCD_MAX_LABEL_ZOOM, availableWidth / labelWidth)
-    local valueZoom = math.min(LCD_MAX_VALUE_ZOOM, availableWidth / valueWidth)
+    local labelMaxZoom = tonumber(textFit and textFit.labelMaxZoom or rect.labelMaxZoom) or LCD_MAX_LABEL_ZOOM
+    local valueMaxZoom = tonumber(textFit and textFit.valueMaxZoom or rect.valueMaxZoom) or LCD_MAX_VALUE_ZOOM
+    local labelZoom = math.min(labelMaxZoom, availableWidth / labelWidth)
+    local valueZoom = math.min(valueMaxZoom, availableWidth / valueWidth)
     local inkTop = fontHeight * LCD_INK_TOP_RATIO
     local inkHeight = fontHeight * LCD_INK_HEIGHT_RATIO
     local gap = math.max(1, scaled(1))
@@ -533,7 +702,7 @@ local function drawTwoLineDisplay(layer, label, value, rect, red, green, blue)
     -- Width is fitted first.  If an unusually large/custom font still makes
     -- the measured ink stack too tall, reduce both rows proportionally.
     local totalInkHeight = inkHeight * (labelZoom + valueZoom)
-    local availableInkHeight = math.max(1, height - gap)
+    local availableInkHeight = math.max(1, height - gap - verticalPadding * 2)
     if totalInkHeight > availableInkHeight then
         local fit = availableInkHeight / totalInkHeight
         labelZoom, valueZoom = labelZoom * fit, valueZoom * fit
@@ -541,10 +710,11 @@ local function drawTwoLineDisplay(layer, label, value, rect, red, green, blue)
     end
 
     local packedHeight = totalInkHeight + gap
-    local packedTop = y + (height - packedHeight) / 2
-    local labelOriginY = packedTop - inkTop * labelZoom
+    local innerHeight = math.max(1, height - verticalPadding * 2)
+    local packedTop = y + verticalPadding + (innerHeight - packedHeight) / 2
+    local labelOriginY = packedTop - inkTop * labelZoom + opticalOffsetY
     local valueInkTop = packedTop + inkHeight * labelZoom + gap
-    local valueOriginY = valueInkTop - inkTop * valueZoom
+    local valueOriginY = valueInkTop - inkTop * valueZoom + opticalOffsetY
 
     drawPackedLCDText(layer, label, x, width, labelOriginY, labelWidth, labelZoom,
         opticalOffsetX, red, green, blue, font)
@@ -633,11 +803,13 @@ end
 
 function ISVehicleDashboard:onYourDashSportGaugeDisplay()
     self.__YourDashSportMainMode = ((self.__YourDashSportMainMode or MAIN_MODE_MPH) % MAIN_MODE_COUNT) + 1
+    persistSportModes(self)
     playCharacterSound(self, "VehicleACButton")
 end
 
 function ISVehicleDashboard:onYourDashSportACDisplay()
     self.__YourDashSportACMode = ((self.__YourDashSportACMode or AC_MODE_INSIDE) % AC_MODE_COUNT) + 1
+    persistSportModes(self)
     playCharacterSound(self, "VehicleACButton")
 end
 
@@ -656,6 +828,7 @@ function ISVehicleDashboard:_YourDashSportKnobChanged(knob)
     local raw = knob:getValue()
     self.__YourDashSportACMode = AC_MODE_SET
     self.__YourDashSportTempIndex = nearestLevelIndex(raw)
+    persistSportModes(self)
     if sendHeaterCommand(self, active, raw) then playCharacterSound(self, "VehicleACSetTemperature") end
 end
 
@@ -668,12 +841,23 @@ function ISVehicleDashboard:_YourDashSportCreateKnob(texture)
     knob.switchSound = "KnobSwitch"
     knob.onMouseUpFct = ISVehicleDashboard._YourDashSportKnobChanged
     knob:addValue(0, 0)
-    knob:addValue(30, 8)
-    knob:addValue(60, 15)
-    knob:addValue(90, 25)
-    knob:addValue(270, -25)
-    knob:addValue(300, -15)
-    knob:addValue(330, -8)
+    knob:addValue(45, 8)
+    knob:addValue(90, 15)
+    knob:addValue(135, 25)
+    knob:addValue(225, -25)
+    knob:addValue(270, -15)
+    knob:addValue(315, -8)
+    function knob:setKnobPosition(value)
+        local raw = AC_RAW_LEVELS[nearestLevelIndex(value)]
+        for index = 1, #self.values do
+            if self.values[index].value == raw then
+                self.selected = index
+                self.lastValue = index
+                return
+            end
+        end
+    end
+    knob:setKnobPosition(0)
 
     local vanillaMouseDown = knob.onMouseDown
     function knob:onMouseDown(x, y)
@@ -688,8 +872,8 @@ function ISVehicleDashboard:_YourDashSportCreateKnob(texture)
         end
     end
 
-    -- Same snap sectors as the vanilla vehicle AC knob, with the center at
-    -- the actual compact sprite center (the stock panel reserves 20px title).
+    -- V-shaped snap sectors: cold at southwest, neutral at north, hot at
+    -- southeast.  The center is the compact sprite center.
     function knob:onMouseMove(dx, dy)
         if self.__disabled or not self.dragging then return end
         local mouseX, mouseY = self:getMouseX(), self:getMouseY()
@@ -718,6 +902,7 @@ function ISVehicleDashboard:_YourDashSportCreateKnob(texture)
             if self.target then
                 self.target.__YourDashSportACMode = AC_MODE_SET
                 self.target.__YourDashSportTempIndex = nearestLevelIndex(self:getValue())
+                persistSportModes(self.target)
             end
         end
     end
@@ -807,17 +992,22 @@ function ISVehicleDashboard:_YourDashSportPositionControls()
     if not controls or not ac then return end
     local baseX, baseY = self.backgroundTex:getX(), self.backgroundTex:getY()
 
-    local function position(element, point)
-        if not element or not point then return end
-        element:setX(baseX + scaled(point.x or 0))
-        element:setY(baseY + scaled(point.y or 0))
+    local function position(element, sectionName, pointName, point)
+        if not element then return end
+        local x, y = nil, nil
+        if YourDash.GetLayoutPoint then
+            x, y = YourDash.GetLayoutPoint(self, sectionName, pointName)
+        end
+        if (x == nil or y == nil) and not point then return end
+        element:setX(baseX + (x or scaled(point.x or 0)))
+        element:setY(baseY + (y or scaled(point.y or 0)))
     end
 
-    position(self.__YourDashSportGaugeDisplayButton, controls.gaugeDisplayButton)
-    position(self.__YourDashSportACBackground, ac.background)
-    position(self.__YourDashSportFanButton, ac.fan)
-    position(self.__YourDashSportACDisplayButton, ac.displayButton)
-    position(self.__YourDashSportTempKnob, ac.knob)
+    position(self.__YourDashSportGaugeDisplayButton, "controls", "gaugeDisplayButton", controls.gaugeDisplayButton)
+    position(self.__YourDashSportACBackground, "ac", "background", ac.background)
+    position(self.__YourDashSportFanButton, "ac", "fan", ac.fan)
+    position(self.__YourDashSportACDisplayButton, "ac", "displayButton", ac.displayButton)
+    position(self.__YourDashSportTempKnob, "ac", "knob", ac.knob)
 
     if self.__YourDashSportOverlay then
         self.__YourDashSportOverlay:setX(baseX)
@@ -892,6 +1082,7 @@ function ISVehicleDashboard:createChildren()
     self.__YourDashSportCreatingChildren = false
     self.__YourDashSportMainMode = self.__YourDashSportMainMode or MAIN_MODE_MPH
     self.__YourDashSportACMode = self.__YourDashSportACMode or AC_MODE_INSIDE
+    if self.vehicle then attachSportState(self, self.vehicle) end
     self:_YourDashSportEnsureControls()
     self:_YourDashSportPositionControls()
     self:_YourDashSportUpdateVisibility()
@@ -902,10 +1093,13 @@ function ISVehicleDashboard:setVehicle(vehicle)
     local previousVehicle = self.vehicle
     if oldSetVehicle then oldSetVehicle(self, vehicle) end
     if previousVehicle ~= vehicle then
-        self.__YourDashSportTrip = newTripState(vehicle)
-        self.__YourDashSportCache = { fastAge = 0.5, averageAge = 2.5 }
-        self.__YourDashSportMainMode = MAIN_MODE_MPH
-        self.__YourDashSportACMode = AC_MODE_INSIDE
+        if vehicle then
+            attachSportState(self, vehicle)
+        else
+            self.__YourDashSportTrip = nil
+            self.__YourDashSportCache = nil
+            self.__YourDashSportResetSerial = nil
+        end
     end
     self:_YourDashSportEnsureControls()
     self:_YourDashSportPositionControls()
@@ -943,4 +1137,25 @@ function ISVehicleDashboard:prerender()
     dt = clamp(dt or (1 / 30), 0, 0.25)
     self:_YourDashSportRefreshCaches(dt)
     self:_YourDashSportUpdateAC()
+end
+
+local function YourDashSportEngineStateTick()
+    for key, state in pairs(SPORT_VEHICLE_STATES) do
+        if not state or state.version ~= SPORT_TRIP_STATE_VERSION then
+            SPORT_VEHICLE_STATES[key] = nil
+        else
+            local running = isVehicleEngineRunning(state.vehicle)
+            if running ~= nil then
+                if state.engineWasRunning and not running then
+                    resetTripState(state, state.vehicle)
+                    resetDisplayState(state)
+                end
+                state.engineWasRunning = running
+            end
+        end
+    end
+end
+
+if Events and Events.OnTick then
+    Events.OnTick.Add(YourDashSportEngineStateTick)
 end
