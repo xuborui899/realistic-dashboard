@@ -189,6 +189,35 @@ function YD.FontHeightForScale(sizeIndexOrKey)
     return nil
 end
 
+-- Physical line heights used while the dashboard layouts were authored.
+-- B42's UI Font Size option replaces the backing atlas; renderers divide
+-- these reference heights by the loaded atlas height so the final dashboard
+-- text occupies the same pixels on every client.  A compact font step is used
+-- by the two-row sport climate/LCD layouts.
+YD.REFERENCE_FONT_HEIGHTS = YD.REFERENCE_FONT_HEIGHTS or {
+    ["0.75x"] = { base = 16, compact = 16 },
+    ["1x"] = { base = 16, compact = 16 },
+    ["1.4x"] = { base = 23, compact = 16 },
+    ["2x"] = { base = 26, compact = 23 },
+}
+
+function YD.ReferenceFontHeightForScale(sizeIndexOrKey, fontStep)
+    local key = YD.ScaleKey(sizeIndexOrKey)
+    local heights = YD.REFERENCE_FONT_HEIGHTS[key] or YD.REFERENCE_FONT_HEIGHTS["1x"]
+    if (tonumber(fontStep) or 0) < 0 then return heights.compact end
+    return heights.base
+end
+
+function YD.FontNormalizationZoom(font, sizeIndexOrKey, fontStep)
+    if not font or not getTextManager then return 1 end
+    local ok, manager = pcall(getTextManager)
+    if not ok or not manager or not manager.getFontHeight then return 1 end
+    local okHeight, actualHeight = pcall(function() return manager:getFontHeight(font) end)
+    actualHeight = okHeight and tonumber(actualHeight) or nil
+    if not actualHeight or actualHeight <= 0 then return 1 end
+    return YD.ReferenceFontHeightForScale(sizeIndexOrKey, fontStep) / actualHeight
+end
+
 function YD.AddScaleChangeListener(listener)
     if type(listener) ~= "function" then return false end
     YD._scaleListeners[listener] = true

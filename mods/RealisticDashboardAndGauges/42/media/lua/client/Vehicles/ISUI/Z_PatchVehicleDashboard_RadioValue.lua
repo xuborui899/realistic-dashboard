@@ -54,14 +54,14 @@ ISVehicleDashboard.RADIO_VALUE_CH6_OFF_X = ISVehicleDashboard.RADIO_VALUE_CH6_OF
 ISVehicleDashboard.RADIO_VALUE_CH6_OFF_Y = ISVehicleDashboard.RADIO_VALUE_CH6_OFF_Y or 19
 
 -- Text positions (relative to radioBG local coords)
-ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_X = ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_X or 53
-ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_Y = ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_Y or 15
+ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_X = ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_X or 49
+ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_Y = ISVehicleDashboard.RADIO_VALUE_TEXT_VOL_Y or 13
 ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_X = ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_X or -62 -- negative = from right edge
-ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_Y = ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_Y or 15
+ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_Y = ISVehicleDashboard.RADIO_VALUE_TEXT_FREQ_Y or 13
 
 -- Optional "set?" center position (relative to radioBG local coords)
 ISVehicleDashboard.RADIO_VALUE_TEXT_SET_X = ISVehicleDashboard.RADIO_VALUE_TEXT_SET_X or -7
-ISVehicleDashboard.RADIO_VALUE_TEXT_SET_Y = ISVehicleDashboard.RADIO_VALUE_TEXT_SET_Y or 15
+ISVehicleDashboard.RADIO_VALUE_TEXT_SET_Y = ISVehicleDashboard.RADIO_VALUE_TEXT_SET_Y or 13
 
 -- Behavior
 ISVehicleDashboard.RADIO_VALUE_VOL_STEP = ISVehicleDashboard.RADIO_VALUE_VOL_STEP or 0.1
@@ -130,6 +130,63 @@ local function ydUIFont()
         if font then return font end
     end
     return UIFont.Small
+end
+
+local function ydMeasureTextX(font, text)
+    local tm = getTextManager and getTextManager() or nil
+    if tm and tm.MeasureStringX then
+        return tm:MeasureStringX(font, tostring(text or ""))
+    end
+    return #tostring(text or "") * 8
+end
+
+local function ydDrawTextLeft(panel, text, x, y, zoom, r, g, b, a, font)
+    if zoom < 0.999 and panel.drawTextZoomed then
+        panel:drawTextZoomed(text, x, y, zoom, r, g, b, a, font)
+    else
+        panel:drawText(text, x, y, r, g, b, a, font)
+    end
+end
+
+local function ydDrawTextRight(panel, text, rightX, y, zoom, r, g, b, a, font)
+    if zoom < 0.999 and panel.drawTextZoomed then
+        local width = ydMeasureTextX(font, text) * zoom
+        panel:drawTextZoomed(text, rightX - width, y, zoom, r, g, b, a, font)
+    else
+        panel:drawTextRight(text, rightX, y, r, g, b, a, font)
+    end
+end
+
+local function ydDrawTextCentre(panel, text, centreX, y, zoom, r, g, b, a, font)
+    if zoom < 0.999 and panel.drawTextZoomed then
+        local width = ydMeasureTextX(font, text) * zoom
+        panel:drawTextZoomed(text, centreX - (width * 0.5), y, zoom, r, g, b, a, font)
+    else
+        panel:drawTextCentre(text, centreX, y, r, g, b, a, font)
+    end
+end
+
+local VALUE_TEXT_HEIGHT = {
+    ["0.75x"] = 13,
+    ["1x"] = 16,
+    ["1.4x"] = 23,
+    ["2x"] = 26,
+}
+
+-- Normalize the game-selected font atlas to a fixed physical height for each
+-- asset pack, then shrink further only when both readouts need more width.
+-- This makes the radio independent of resolution and the B42 UI-font option.
+local function ydValueTextZoom(scale, font, left, right, leftX, rightX)
+    local tm = getTextManager and getTextManager() or nil
+    local fontH = tm and tm.getFontHeight and tm:getFontHeight(font) or 16
+    local targetH = VALUE_TEXT_HEIGHT[ydPack(scale)] or 16
+    local zoom = math.min(1, targetH / math.max(1, fontH))
+    local width = ydMeasureTextX(font, left) + ydMeasureTextX(font, right)
+    local available = math.max(1, (rightX or 0) - (leftX or 0) - 3)
+    if width > 0 then
+        zoom = math.min(zoom, available / width)
+    end
+    return clamp(zoom, 0.20, 1)
 end
 
 local function ydRadioAnchor(dash, layoutKey, fallbackX, fallbackY, scale)
@@ -641,9 +698,11 @@ function ISVehicleDashboard:_ensureValueRadioControls()
             local SET_Y  = ydScaled(dash.RADIO_VALUE_TEXT_SET_Y or 0, scale)
 
             if dash.__radioValueSetArmed == true then
-                self:drawTextCentre("set?",
+                local setZoom = ydValueTextZoom(scale, font, "set?", "", 0, self.width)
+                ydDrawTextCentre(self, "set?",
                     (self.width * 0.5) + (SET_X or 0),
                     (SET_Y or 0),
+                    setZoom,
                     rgb.r, rgb.g, rgb.b, a, font
                 )
                 return
@@ -651,19 +710,23 @@ function ISVehicleDashboard:_ensureValueRadioControls()
 
             local left  = dash.__radioValueTextLeft  or ""
             local right = dash.__radioValueTextRight or ""
+            local rightX = self.width + (FREQ_X or 0)
+            local textZoom = ydValueTextZoom(scale, font, left, right, VOL_X, rightX)
 
             if left ~= "" then
-                self:drawText(left,
+                ydDrawTextLeft(self, left,
                     VOL_X,
                     VOL_Y,
+                    textZoom,
                     rgb.r, rgb.g, rgb.b, a, font
                 )
             end
 
             if right ~= "" then
-                self:drawTextRight(right,
-                    self.width + (FREQ_X or 0),
+                ydDrawTextRight(self, right,
+                    rightX,
                     FREQ_Y,
+                    textZoom,
                     rgb.r, rgb.g, rgb.b, a, font
                 )
             end

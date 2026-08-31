@@ -1049,13 +1049,15 @@ local function paxDrawFittedCentre(layer, text, rect, scale, maximumZoom)
         end
     end
     fontHeight = tonumber(fontHeight) or height
+    local normalizationZoom = YourDash.FontNormalizationZoom and
+        YourDash.FontNormalizationZoom(font, nil, 0) or 1
     textWidth = tonumber(textWidth)
 
     if textWidth and textWidth > 0 and layer.drawTextZoomed then
-        local zoom = math.min(maximumZoom or 1,
+        local zoom = math.min((maximumZoom or 1) * normalizationZoom,
             math.max(1, width - 2) / textWidth,
             math.max(1, height - 1) / fontHeight)
-        if zoom < 0.999 then
+        if math.abs(zoom - 1) > 0.001 then
             layer:drawTextZoomed(text,
                 x + (width - textWidth * zoom) / 2 + opticalOffsetX,
                 y + (height - fontHeight * zoom) / 2,
@@ -1125,8 +1127,10 @@ local function paxDrawTwoLineACDisplay(layer, label, value, rect, scale)
     local availableWidth = math.max(1, width - 2)
     local labelMaxZoom = tonumber(textFit and textFit.labelMaxZoom or rect.labelMaxZoom) or 1.00
     local valueMaxZoom = tonumber(textFit and textFit.valueMaxZoom or rect.valueMaxZoom) or 1.25
-    local labelZoom = math.min(labelMaxZoom, availableWidth / labelWidth)
-    local valueZoom = math.min(valueMaxZoom, availableWidth / valueWidth)
+    local normalizationZoom = YourDash.FontNormalizationZoom and
+        YourDash.FontNormalizationZoom(font, nil, fontStep) or 1
+    local labelZoom = math.min(labelMaxZoom * normalizationZoom, availableWidth / labelWidth)
+    local valueZoom = math.min(valueMaxZoom * normalizationZoom, availableWidth / valueWidth)
     local inkTop = fontHeight * 0.25
     local inkHeight = fontHeight * 0.56
     local gap = math.max(1, paxScaled(1, scale))

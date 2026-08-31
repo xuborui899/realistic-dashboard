@@ -62,18 +62,20 @@ ISVehicleDashboard.RADIO_TEXT_VOL_Y  = 24
 ISVehicleDashboard.RADIO_TEXT_FREQ_X = -32  -- negative = from right edge
 ISVehicleDashboard.RADIO_TEXT_FREQ_Y = 24
 
-ISVehicleDashboard.RADIO_TEXT_VOL_CENTER_X = 48
+ISVehicleDashboard.RADIO_TEXT_VOL_CENTER_X = 40
 ISVehicleDashboard.RADIO_TEXT_FREQ_CENTER_X = -52
-ISVehicleDashboard.RADIO_TEXT_SIDE_NUMBER_Y = 24
+ISVehicleDashboard.RADIO_TEXT_SIDE_NUMBER_Y = 22
 ISVehicleDashboard.RADIO_TEXT_SIDE_BLOCK_W = 42
 ISVehicleDashboard.RADIO_TEXT_SIDE_NUMBER_ZOOM = 1.12
 ISVehicleDashboard.RADIO_TEXT_MAIN_ZOOM = 1.08
+ISVehicleDashboard.RADIO_TEXT_VOL_RESERVE = "10"
+ISVehicleDashboard.RADIO_TEXT_FREQ_RESERVE = "108.0"
 
 ISVehicleDashboard.RADIO_TEXT_NAME_X = 0    -- 0 = centered
-ISVehicleDashboard.RADIO_TEXT_NAME_Y = 24
+ISVehicleDashboard.RADIO_TEXT_NAME_Y = 22
 
 ISVehicleDashboard.RADIO_TEXT_ARMED_X = 0   -- 0 = centered
-ISVehicleDashboard.RADIO_TEXT_ARMED_Y = 24
+ISVehicleDashboard.RADIO_TEXT_ARMED_Y = 22
 
 -- Marquee clip rect (relative to radioBG local coords)
 -- These are the 1x fallback values.  The renderer narrows this corridor at
@@ -464,10 +466,19 @@ local function measureTextHeight(font)
     return ydScaled(16)
 end
 
+local PREMIUM_TEXT_BASE_HEIGHT = {
+    ["0.75x"] = 13,
+    ["1x"] = 16,
+    ["1.4x"] = 23,
+    ["2x"] = 26,
+}
+
 local function premiumTextZoomForLCD(dash, scale, font, wantedZoom)
-    local zoom = tonumber(wantedZoom) or 1.00
+    local requestedZoom = tonumber(wantedZoom) or 1.00
     local lcdH = math.max(1, ydScaled(dash.RADIO_TEXT_LCD_H or 20, scale))
     local fontH = math.max(1, measureTextHeight(font))
+    local targetH = PREMIUM_TEXT_BASE_HEIGHT[ydPack(scale)] or 16
+    local zoom = (targetH * requestedZoom) / fontH
     local fitZoom = math.max(0.01, (lcdH - 1) / fontH)
     return math.min(zoom, fitZoom)
 end
@@ -543,9 +554,10 @@ local function premiumSideDisplaySpec(dash, width, scale, side, text)
     }
 end
 
--- Calculate the middle carousel from the actual rendered widths of the two
--- side readouts.  A fixed 1x clip scaled down to 0.75x overlaps because the
--- smallest UI font remains 16 pixels high/wide instead of becoming 0.75x.
+-- Calculate the middle carousel from fixed widest-value reservations.  The
+-- visible side numbers still use their measured widths for centering, but the
+-- carousel must not jump when volume changes from one digit to two digits (or
+-- when radio frequency is replaced by the shorter CD label).
 local function premiumLCDGeometry(dash, width, scale, mainFont, left, right)
     width = tonumber(width) or ydScaled(196, scale)
     scale = scale or ydScale()
@@ -560,14 +572,18 @@ local function premiumLCDGeometry(dash, width, scale, mainFont, left, right)
     local sideGap = math.max(1, ydScaled(dash.RADIO_TEXT_SIDE_GAP or 2, scale))
     local leftSpec = premiumSideDisplaySpec(dash, width, scale, "left", left)
     local rightSpec = premiumSideDisplaySpec(dash, width, scale, "right", right)
+    local leftReserve = leftSpec and premiumSideDisplaySpec(dash, width, scale, "left",
+        dash.RADIO_TEXT_VOL_RESERVE or "10") or nil
+    local rightReserve = rightSpec and premiumSideDisplaySpec(dash, width, scale, "right",
+        dash.RADIO_TEXT_FREQ_RESERVE or "108.0") or nil
     local clipX = lcdX
     local clipRight = lcdRight
 
-    if leftSpec then
-        clipX = math.max(clipX, leftSpec.right + sideGap)
+    if leftReserve then
+        clipX = math.max(clipX, leftReserve.right + sideGap)
     end
-    if rightSpec then
-        clipRight = math.min(clipRight, rightSpec.left - sideGap)
+    if rightReserve then
+        clipRight = math.min(clipRight, rightReserve.left - sideGap)
     end
 
     -- Defensive fallback for unusual translated fonts.  It remains confined

@@ -34,6 +34,17 @@ local function YourDash_ButtonTexture(name)
     return nil
 end
 
+-- The sport warning exports keep the authored warning tile unchanged but add
+-- a blurred glow canvas around it.  These are exact source-pixel insets for
+-- each authored texture pack; using a calculated scale would put 1.4x one
+-- pixel off because that export rounds its inset up to 51 pixels.
+local SPORT_WARNING_GLOW_INSET = {
+    ["0.75x"] = 27,
+    ["1x"] = 36,
+    ["1.4x"] = 51,
+    ["2x"] = 72,
+}
+
 local function YourDash_Text(key, fallback)
     if getText then
         local ok, text = pcall(getText, key)
@@ -1162,6 +1173,46 @@ ISVehicleDashboard.GEAR_FONT_REG   = ISVehicleDashboard.GEAR_FONT_REG   or UIFon
 ISVehicleDashboard.GEAR_FONT_LARGE = ISVehicleDashboard.GEAR_FONT_LARGE or UIFont.Large
 -- (If you want it HUGE, try UIFont.Massive)
 
+-- Dashboard coordinates were authored against these physical line heights.
+-- B42 swaps the backing font atlas when its UI Font Size option changes, so
+-- scale the loaded atlas back to a fixed dashboard-pixel height.  This keeps
+-- both the gear size and its baseline stable at every resolution/font option.
+local GEAR_REFERENCE_FONT_HEIGHT = {
+    ["0.75x"] = 16,
+    ["1x"] = 16,
+    ["1.4x"] = 23,
+    ["2x"] = 26,
+}
+
+local function _yourDashNormalizedGearPrerender(label)
+    local text = label.translation or label.name or ""
+    local font = label.font or UIFont.Small
+    local zoom = tonumber(label.__YourDashGearFontZoom) or 1
+
+    if label.textColor then
+        label.r = label.textColor.r
+        label.g = label.textColor.g
+        label.b = label.textColor.b
+        label.a = label.textColor.a
+    end
+
+    local tm = getTextManager and getTextManager() or nil
+    local width = tm and tm.MeasureStringX and tm:MeasureStringX(font, text) or 0
+    local renderedWidth = math.max(1, math.ceil(width * zoom))
+    if label.setWidth then label:setWidth(renderedWidth) else label.width = renderedWidth end
+
+    if label.drawTextZoomed then
+        local x = label.center and -(renderedWidth * 0.5) or 0
+        label:drawTextZoomed(text, x, 0, zoom, label.r, label.g, label.b, label.a, font)
+    elseif label.center then
+        label:drawTextCentre(text, 0, 0, label.r, label.g, label.b, label.a, font)
+    else
+        label:drawText(text, 0, 0, label.r, label.g, label.b, label.a, font)
+    end
+
+    if label.updateTooltip then label:updateTooltip() end
+end
+
 function ISVehicleDashboard:_YourDashApplyGearFont(useLarge)
     if not self.btn_partSpeed then return end
     useLarge = (useLarge == true)
@@ -1176,15 +1227,28 @@ function ISVehicleDashboard:_YourDashApplyGearFont(useLarge)
         self.btn_partSpeed.font = font
     end
 
-    -- Optional: update label height so the click/align box matches the new font
+    -- Normalize the loaded font to the asset pack's physical pixel height.
     local tm = getTextManager and getTextManager() or nil
     local h = tm and tm.getFontHeight and tm:getFontHeight(font) or nil
     if h then
+        local scaleKey = YourDash.GetScaleKey and YourDash.GetScaleKey() or "1x"
+        local referenceH = YourDash.ReferenceFontHeightForScale and
+            YourDash.ReferenceFontHeightForScale(scaleKey, 0) or
+            GEAR_REFERENCE_FONT_HEIGHT[scaleKey] or 16
+        self.btn_partSpeed.__YourDashGearFontZoom = referenceH / math.max(1, h)
+
         if self.btn_partSpeed.setHeight then
-            self.btn_partSpeed:setHeight(h)
+            self.btn_partSpeed:setHeight(referenceH)
         else
-            self.btn_partSpeed.height = h
+            self.btn_partSpeed.height = referenceH
         end
+    else
+        self.btn_partSpeed.__YourDashGearFontZoom = 1
+    end
+
+    if not self.btn_partSpeed.__YourDashNormalizedGearRender then
+        self.btn_partSpeed.__YourDashNormalizedGearRender = true
+        self.btn_partSpeed.prerender = _yourDashNormalizedGearPrerender
     end
 end
 
@@ -2775,6 +2839,7 @@ function ISVehicleDashboard:onResolutionChange()
     local warnings = layout and layout.warnings or {}
     local scale = YourDash.GetScale and YourDash.GetScale() or 1
     local useLarge = scale >= 1.4
+    self:_YourDashApplyGearFont(useLarge)
     local function pos(sectionName, section, name, fallbackX, fallbackY)
         if YourDash.GetLayoutPoint then
             local x, y = YourDash.GetLayoutPoint(self, sectionName, name)
@@ -2809,6 +2874,19 @@ function ISVehicleDashboard:onResolutionChange()
     local WDX, WDY = pos("warnings", warnings, "door", self.WARN_DOOR_X, self.WARN_DOOR_Y)
     local WFX, WFY = pos("warnings", warnings, "fuel", self.WARN_FUEL_X, self.WARN_FUEL_Y)
     local WLX, WLY = pos("warnings", warnings, "light", self.WARN_LIGHT_X, self.WARN_LIGHT_Y)
+
+    if self.__YourDashFamily == "sport" then
+        local scaleKey = YourDash.GetScaleKey and YourDash.GetScaleKey() or "1x"
+        local inset = SPORT_WARNING_GLOW_INSET[scaleKey] or SPORT_WARNING_GLOW_INSET["1x"]
+        WCX, WCY = WCX - inset, WCY - inset
+        WBX, WBY = WBX - inset, WBY - inset
+        WRX, WRY = WRX - inset, WRY - inset
+        WKX, WKY = WKX - inset, WKY - inset
+        WSX, WSY = WSX - inset, WSY - inset
+        WDX, WDY = WDX - inset, WDY - inset
+        WFX, WFY = WFX - inset, WFY - inset
+        WLX, WLY = WLX - inset, WLY - inset
+    end
 
 
     if self.speedregulatorTex then
@@ -2923,6 +3001,5 @@ function ISVehicleDashboard:onResolutionChange()
         if self._YourDashFinalizeWearOrder then self:_YourDashFinalizeWearOrder() end
     end
     self:_YourDashPositionSideButtons()
-    self:_YourDashApplyGearFont(useLarge)
 
 end

@@ -593,18 +593,19 @@ local function drawCentered(layer, text, rect, red, green, blue, maximumZoom)
         if ok and manager then textWidth = safeCall(manager, "MeasureStringX", font, text) end
     end
     fontHeight = tonumber(fontHeight) or height
+    local normalizationZoom = YourDash.FontNormalizationZoom and
+        YourDash.FontNormalizationZoom(font, nil, 0) or 1
 
-    -- B42's smallest normal UI font is still 16 px high.  The authored 0.75x
-    -- sport LCDs are narrower than several valid temperature/MPG strings, so
-    -- fit only overflowing text with the engine's zoomed-text renderer.  This
-    -- preserves the complete label and configured C/F unit instead of clipping
-    -- or changing the information at the smallest dashboard size.
+    -- Normalize the game-selected atlas first, then fit overflowing strings.
+    -- This preserves the complete label/unit while keeping the same physical
+    -- text size and baseline on clients with different UI-font settings.
     textWidth = tonumber(textWidth)
     if textWidth and textWidth > 0 and layer.drawTextZoomed then
         local availableWidth = math.max(1, width - 2)
         local availableHeight = math.max(1, height - 1)
-        local zoom = math.min(maximumZoom or 1, availableWidth / textWidth, availableHeight / fontHeight)
-        if zoom < 0.999 then
+        local zoom = math.min((maximumZoom or 1) * normalizationZoom,
+            availableWidth / textWidth, availableHeight / fontHeight)
+        if math.abs(zoom - 1) > 0.001 then
             layer:drawTextZoomed(text,
                 x + (width - textWidth * zoom) / 2 + opticalOffsetX,
                 y + (height - fontHeight * zoom) / 2,
@@ -693,8 +694,10 @@ local function drawTwoLineDisplay(layer, label, value, rect, red, green, blue)
     local availableWidth = math.max(1, width - 2)
     local labelMaxZoom = tonumber(textFit and textFit.labelMaxZoom or rect.labelMaxZoom) or LCD_MAX_LABEL_ZOOM
     local valueMaxZoom = tonumber(textFit and textFit.valueMaxZoom or rect.valueMaxZoom) or LCD_MAX_VALUE_ZOOM
-    local labelZoom = math.min(labelMaxZoom, availableWidth / labelWidth)
-    local valueZoom = math.min(valueMaxZoom, availableWidth / valueWidth)
+    local normalizationZoom = YourDash.FontNormalizationZoom and
+        YourDash.FontNormalizationZoom(font, nil, fontStep) or 1
+    local labelZoom = math.min(labelMaxZoom * normalizationZoom, availableWidth / labelWidth)
+    local valueZoom = math.min(valueMaxZoom * normalizationZoom, availableWidth / valueWidth)
     local inkTop = fontHeight * LCD_INK_TOP_RATIO
     local inkHeight = fontHeight * LCD_INK_HEIGHT_RATIO
     local gap = math.max(1, scaled(1))
