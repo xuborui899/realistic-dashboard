@@ -295,8 +295,8 @@ function Controller:_createKnob()
     -- DrawTextureAngle rotates the supplied upright handle clockwise.
     -- OFF is west, then 1, 2, and 3 sweep clockwise across the top to east.
     knob:addValue(270, 0)
-    knob:addValue(315, 1)
-    knob:addValue(45, 2)
+    knob:addValue(330, 1)
+    knob:addValue(30, 2)
     knob:addValue(90, 3)
     knob.onMouseUpFct = function(controller, element)
         if controller then controller:_setLightbarLightsMode(element:getValue()) end

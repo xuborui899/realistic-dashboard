@@ -1588,6 +1588,17 @@ function YourDashPassengerDashboard:createChildren()
 			if _upOut then return _upOut(self, x, y) end
 			return true
 		end
+
+		local _move = self.windowTex.onMouseMove
+		function self.windowTex:onMouseMove(dx, dy)
+			local dash = self.target
+			local family = dash and (dash.__YourDashFamily or "standard") or "standard"
+			if family == "heavy" or family == "sport" then
+				local isUp = self:getMouseY() < (self.height * 0.5)
+				self.mouseovertext = getText(isUp and "ContextMenu_Close_window" or "ContextMenu_Open_window")
+			end
+			if _move then return _move(self, dx, dy) end
+		end
 	end
 
 	-- AC: create a heaterTex slot so your AC patch can reuse it
@@ -1822,11 +1833,17 @@ function YourDashPassengerDashboard:prerender()
 			self.windowTex.onclick = ISVehicleDashboard.onClickWindow
 			self.windowTex.target = self
 
-			local w = windowPart:getWindow()
-			if w and w:isOpen() then
-				self.windowTex.mouseovertext = getText("ContextMenu_Close_window")
+			local family = self.__YourDashFamily or "standard"
+			if family == "heavy" or family == "sport" then
+				local isUp = self.windowTex:getMouseY() < (self.windowTex.height * 0.5)
+				self.windowTex.mouseovertext = getText(isUp and "ContextMenu_Close_window" or "ContextMenu_Open_window")
 			else
-				self.windowTex.mouseovertext = getText("ContextMenu_Open_window")
+				local w = windowPart:getWindow()
+				if w and w:isOpen() then
+					self.windowTex.mouseovertext = getText("ContextMenu_Close_window")
+				else
+					self.windowTex.mouseovertext = getText("ContextMenu_Open_window")
+				end
 			end
 		end
 
