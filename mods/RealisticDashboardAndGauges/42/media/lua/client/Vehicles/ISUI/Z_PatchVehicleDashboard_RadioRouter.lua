@@ -1,6 +1,7 @@
 if isServer() then return end
 
 require "YourDash/DashboardCore"
+require "YourDash/EmergencyLightController"
 require "Vehicles/ISUI/ISVehicleDashboard"
 
 -- Guard: don’t patch twice
@@ -15,6 +16,7 @@ local _baseCreateChildren = ISVehicleDashboard.createChildren
 local _baseOnRes          = ISVehicleDashboard.onResolutionChange
 local _basePrerender      = ISVehicleDashboard.prerender
 local _baseSetVehicle     = ISVehicleDashboard.setVehicle
+local ELC                 = YourDash.EmergencyLightController
 
 -- Tell submodules not to hook dashboard methods (if they support it)
 ISVehicleDashboard.__YourDashRadioRouterActive = true
@@ -236,6 +238,7 @@ function ISVehicleDashboard:setVehicle(vehicle)
     local previousVehicle = self.vehicle
     if _baseSetVehicle then _baseSetVehicle(self, vehicle) end
     if previousVehicle ~= vehicle then self:_yourDashResetRadioTransientState() end
+    if ELC then ELC.SetVehicle(self, vehicle, previousVehicle ~= vehicle) end
 end
 
 function ISVehicleDashboard:createChildren()
@@ -243,17 +246,26 @@ function ISVehicleDashboard:createChildren()
     if self._ensureRadioControls then pcall(function() self:_ensureRadioControls() end) end
     if self._ensureValueRadioControls then pcall(function() self:_ensureValueRadioControls() end) end
     self:_yourDashPositionRoutedRadio()
+    if ELC then
+        ELC.Ensure(self)
+        ELC.Position(self)
+    end
 end
 
 function ISVehicleDashboard:onResolutionChange()
     if _baseOnRes then _baseOnRes(self) end
     self:_yourDashPositionRoutedRadio()
+    if ELC then ELC.Position(self) end
 end
 
 function ISVehicleDashboard:prerender()
     if _basePrerender then _basePrerender(self) end
-    if not self.vehicle or not ISUIHandler.allUIVisible then return end
+    if not self.vehicle or not ISUIHandler.allUIVisible then
+        if ELC then ELC.Update(self, false) end
+        return
+    end
     self:_yourDashUpdateRoutedRadio()
+    if ELC then ELC.Update(self, true) end
 end
 
 -- Extra safety: if Premium/Value update gets called from anywhere, bail on no-radio vehicles.

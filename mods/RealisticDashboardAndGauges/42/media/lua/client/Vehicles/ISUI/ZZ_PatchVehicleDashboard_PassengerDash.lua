@@ -8,6 +8,7 @@ require "Vehicles/ISUI/ISVehiclePartMenu"
 require "Vehicles/ISUI/ISVehicleMenu"
 require "Vehicles/VehicleUtils"
 require "YourDash/DashboardCore"
+require "YourDash/EmergencyLightController"
 
 -- Ensure AC functions exist (guard in that file prevents double-patch).
 pcall(function() require "Vehicles/ISUI/Z_PatchVehicleDashboard_AC" end)
@@ -1431,6 +1432,10 @@ function YourDashPassengerDashboard:_paxHideAllExpandedControls()
 	if self._radioValueDisarmSet   then pcall(function() self:_radioValueDisarmSet() end) end
 	if self._radioStopFreqHold     then pcall(function() self:_radioStopFreqHold() end) end
 	if self._radioDisarmSet        then pcall(function() self:_radioDisarmSet() end) end
+
+    if YourDash.EmergencyLightController then
+        YourDash.EmergencyLightController.Update(self, false)
+    end
 end
 
 -- =========================================================
@@ -1444,6 +1449,8 @@ function YourDashPassengerDashboard:onClickPaxToggle()
 
 	if self.__paxRetracted then
 		self:_paxHideAllExpandedControls()
+	elseif YourDash.EmergencyLightController then
+        YourDash.EmergencyLightController.Update(self, true)
 	end
 end
 
@@ -1597,6 +1604,9 @@ function YourDashPassengerDashboard:createChildren()
 	if self._ensureRadioControls then pcall(function() self:_ensureRadioControls() end) end
 	if self._ensureValueRadioControls then pcall(function() self:_ensureValueRadioControls() end) end
 	self:_paxEnsureSportExtras()
+    if YourDash.EmergencyLightController then
+        YourDash.EmergencyLightController.Ensure(self)
+    end
 
 	self:_paxApplyBGTexture()
 	self:_paxRefreshToggleTexture()
@@ -1613,6 +1623,7 @@ end
 -- =========================================================
 function YourDashPassengerDashboard:setVehicle(vehicle)
 	local previousVehicle = self.vehicle
+	local changedVehicle = previousVehicle ~= vehicle
 	self.vehicle = vehicle
 	if previousVehicle ~= vehicle and self._yourDashResetRadioTransientState then
 		self:_yourDashResetRadioTransientState()
@@ -1620,6 +1631,9 @@ function YourDashPassengerDashboard:setVehicle(vehicle)
 	if previousVehicle ~= vehicle then self.__YourDashSportACMode = 1 end
 
 	if not vehicle then
+		if YourDash.EmergencyLightController then
+            YourDash.EmergencyLightController.SetVehicle(self, nil, false)
+        end
 		self:setVisible(false)
 		if self.removeFromUIManager then self:removeFromUIManager() end
 		return
@@ -1627,9 +1641,11 @@ function YourDashPassengerDashboard:setVehicle(vehicle)
 
 	local profile = YourDash.GetVehicleProfile and YourDash.GetVehicleProfile(vehicle, true) or nil
 	self:_paxApplyTexturePack(profile, false)
-
 	self:setVisible(true)
 	if self.addToUIManager then self:addToUIManager() end
+	if YourDash.EmergencyLightController then
+        YourDash.EmergencyLightController.SetVehicle(self, vehicle, changedVehicle)
+    end
 	self:onResolutionChange()
 end
 
@@ -1713,13 +1729,21 @@ function YourDashPassengerDashboard:onResolutionChange()
 	-- Radio positions (both; router chooses which is visible)
 	if self._positionRadioControls then pcall(function() self:_positionRadioControls() end) end
 	if self._positionValueRadioControls then pcall(function() self:_positionValueRadioControls() end) end
+    if YourDash.EmergencyLightController then
+        YourDash.EmergencyLightController.Position(self)
+    end
 end
 
 -- =========================================================
 -- Update each frame (simple + reliable)
 -- =========================================================
 function YourDashPassengerDashboard:prerender()
-	if not self.vehicle or not ISUIHandler.allUIVisible then return end
+	if not self.vehicle or not ISUIHandler.allUIVisible then
+        if YourDash.EmergencyLightController then
+            YourDash.EmergencyLightController.Update(self, false)
+        end
+        return
+    end
 
 	-- Family/accent and all four texture packs hot-swap in place.
 	local profile = YourDash.GetVehicleProfile and YourDash.GetVehicleProfile(self.vehicle) or nil
@@ -1827,6 +1851,9 @@ function YourDashPassengerDashboard:prerender()
 		if self._updateRadioControls then pcall(function() self:_updateRadioControls() end) end
 		if self._updateValueRadioControls then pcall(function() self:_updateValueRadioControls() end) end
 	end
+    if YourDash.EmergencyLightController then
+        YourDash.EmergencyLightController.Update(self, true)
+    end
 end
 
 -- IMPORTANT:
