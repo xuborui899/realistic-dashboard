@@ -64,6 +64,94 @@ local function safeMethod(object, methodName, ...)
     return value, true
 end
 
+-- Some hotbar mods draw their hover labels inside the hotbar panel itself.
+-- Keep a hovered hotbar above the vehicle dashboard so those labels remain
+-- readable without depending on a particular hotbar implementation.
+function YD.KeepHoveredHotbarAboveDashboard(owner)
+    if not owner or not getPlayerHotbar then return end
+
+    local playerNum = tonumber(owner.playerNum)
+    if playerNum == nil then return end
+
+    local ok, hotbar = pcall(getPlayerHotbar, playerNum)
+    if not ok or not hotbar or not hotbar.bringToTop then return end
+
+    local hovered = safeMethod(hotbar, "isMouseOver")
+    if hovered == true then
+        pcall(hotbar.bringToTop, hotbar)
+    end
+end
+
+-- Vanilla ISImage tooltips reserve 220 pixels even for a short label and pin
+-- themselves directly below the image. Keep dashboard labels text-sized, then
+-- use the normal near-cursor offset so they do not sit under the pointer.
+function YD.PositionCompactTooltip(element, tooltip, dashboard)
+    if not element or not tooltip then return end
+
+    local buttonTooltip = element.__YourDashButtonTooltip == true
+        or element.__YourDashPressedInstalled == true
+        or element.__disabled ~= nil
+        or element.onclick ~= nil
+    if buttonTooltip and YD.AreButtonTooltipsEnabled and not YD.AreButtonTooltipsEnabled() then
+        if tooltip.setVisible then tooltip:setVisible(false) end
+        return
+    end
+
+    tooltip.defaultMyWidth = 0
+    tooltip.nameMarginX = 0
+    tooltip.maxLineWidth = 1000
+    tooltip.followMouse = true
+    tooltip.desiredX = nil
+    tooltip.desiredY = nil
+    tooltip.__YourDashCompactTooltip = true
+    if tooltip.javaObject and tooltip.javaObject.setConsumeMouseEvents then
+        tooltip.javaObject:setConsumeMouseEvents(false)
+    end
+
+    if not tooltip.description or tooltip.description == "" then return end
+    if tooltip.doLayout then pcall(tooltip.doLayout, tooltip) end
+end
+
+function YD.InstallCompactTooltip(element, dashboard)
+    if not element then return end
+    if element.__YourDashCompactTooltipInstalled then
+        element.__YourDashTooltipDashboard = dashboard or element.__YourDashTooltipDashboard
+        return
+    end
+
+    local baseUpdateTooltip = element.updateTooltip
+    if type(baseUpdateTooltip) ~= "function" then return end
+
+    element.__YourDashCompactTooltipInstalled = true
+    element.__YourDashTooltipDashboard = dashboard
+    element.updateTooltip = function(self, ...)
+        baseUpdateTooltip(self, ...)
+        if self.tooltipUI then
+            YD.PositionCompactTooltip(self, self.tooltipUI, self.__YourDashTooltipDashboard)
+        end
+    end
+end
+
+function YD.InstallCompactTooltipTree(root, dashboard)
+    if not root then return end
+
+    local visited = {}
+    local function visit(element)
+        if not element or visited[element] then return end
+        visited[element] = true
+        YD.InstallCompactTooltip(element, dashboard or root)
+
+        local children = element.childrenInOrder or element.children
+        if children then
+            for _, child in pairs(children) do
+                visit(child)
+            end
+        end
+    end
+
+    visit(root)
+end
+
 local function cleanRelativePath(value)
     if value == nil then return nil end
     local path = tostring(value)
@@ -91,6 +179,93 @@ end
 YD.MODOPT_ID = YD.MODOPT_ID or "RealisticDash"
 YD.MODOPT_NAME = YD.MODOPT_NAME or "Realistic Dashboard & Gauges"
 YD.OPT_TEXSIZE_ID = YD.OPT_TEXSIZE_ID or "TextureSize"
+YD.OPT_SHORTCUT_BUTTONS_ID = YD.OPT_SHORTCUT_BUTTONS_ID or "SeatSleepShortcuts"
+YD.OPT_BUTTON_TOOLTIPS_ID = YD.OPT_BUTTON_TOOLTIPS_ID or "ButtonTooltips"
+YD.OPT_ENGINE_CONDITION_HOVER_ID = YD.OPT_ENGINE_CONDITION_HOVER_ID or "EngineConditionHover"
+
+-- This is a per-player UI preference.  Only an absent option gets the default;
+-- an existing saved choice is always respected on later game launches.
+if YD._shortcutButtonsEnabled == nil then
+    YD._shortcutButtonsEnabled = true
+end
+if YD._buttonTooltipsEnabled == nil then
+    YD._buttonTooltipsEnabled = true
+end
+if YD._engineConditionHoverEnabled == nil then
+    YD._engineConditionHoverEnabled = false
+end
+
+function YD.AreSeatSleepShortcutButtonsEnabled()
+    return YD._shortcutButtonsEnabled ~= false
+end
+
+function YD.SetSeatSleepShortcutButtonsEnabled(value)
+    local enabled = value ~= false
+    local changed = YD._shortcutButtonsEnabled ~= enabled
+    YD._shortcutButtonsEnabled = enabled
+    return changed
+end
+
+function YD.AreButtonTooltipsEnabled()
+    return YD._buttonTooltipsEnabled ~= false
+end
+
+function YD.GetClockTime12Hour()
+    local gameTime = nil
+    if getGameTime then
+        local ok, value = pcall(getGameTime)
+        if ok then gameTime = value end
+    end
+    if not gameTime and GameTime and GameTime.getInstance then
+        local ok, value = pcall(GameTime.getInstance)
+        if ok then gameTime = value end
+    end
+    if not gameTime then return nil end
+
+    local hour = safeMethod(gameTime, "getHour")
+    local minute = safeMethod(gameTime, "getMinutes")
+    hour = tonumber(hour)
+    minute = tonumber(minute)
+    if hour == nil or minute == nil then
+        local timeOfDay = tonumber(safeMethod(gameTime, "getTimeOfDay")) or 0
+        timeOfDay = timeOfDay % 24
+        hour = math.floor(timeOfDay)
+        minute = (timeOfDay % 1) * 60
+    end
+
+    hour = math.floor(hour or 0) % 24
+    minute = roundNearest(minute or 0)
+    if minute >= 60 then
+        hour = (hour + math.floor(minute / 60)) % 24
+        minute = minute % 60
+    elseif minute < 0 then
+        local borrowedHours = math.ceil(-minute / 60)
+        hour = (hour - borrowedHours) % 24
+        minute = minute + borrowedHours * 60
+    end
+
+    local displayHour = hour % 12
+    if displayHour == 0 then displayHour = 12 end
+    return string.format("Time: %d:%02d", displayHour, minute)
+end
+
+function YD.SetButtonTooltipsEnabled(value)
+    local enabled = value ~= false
+    local changed = YD._buttonTooltipsEnabled ~= enabled
+    YD._buttonTooltipsEnabled = enabled
+    return changed
+end
+
+function YD.AreEngineConditionHoverEnabled()
+    return YD._engineConditionHoverEnabled == true
+end
+
+function YD.SetEngineConditionHoverEnabled(value)
+    local enabled = value == true
+    local changed = YD._engineConditionHoverEnabled ~= enabled
+    YD._engineConditionHoverEnabled = enabled
+    return changed
+end
 
 YD.TEXTURE_SIZES = YD.TEXTURE_SIZES or {
     { key = "0.75x", scale = 0.75, label = "Small (0.75x)", fontKey = "NewSmall" },
@@ -99,6 +274,7 @@ YD.TEXTURE_SIZES = YD.TEXTURE_SIZES or {
     { key = "2x",    scale = 2.00, label = "Extra Large (2x)", fontKey = "Large" },
 }
 
+-- New installs default to Regular (1x); persisted ModOptions selections win.
 YD.DEFAULT_TEXTURE_SIZE_INDEX = 2
 YD._textureSizeIndex = tonumber(YD._textureSizeIndex) or YD.DEFAULT_TEXTURE_SIZE_INDEX
 YD._scaleListeners = YD._scaleListeners or newWeakKeyTable()
@@ -289,6 +465,54 @@ function YD.ReadTextureSizeOption(section)
     return YD.TextureSizeIndex()
 end
 
+function YD.ReadShortcutButtonsOption(section)
+    section = section or getModOptionsSection(false)
+    local option = getSectionOption(section, YD.OPT_SHORTCUT_BUTTONS_ID)
+    if not option or not option.getValue then
+        YD.SetSeatSleepShortcutButtonsEnabled(true)
+        return YD.AreSeatSleepShortcutButtonsEnabled()
+    end
+
+    local ok, value = pcall(function()
+        return option:getValue()
+    end)
+    if not ok or value == nil then value = true end
+    YD.SetSeatSleepShortcutButtonsEnabled(value == true)
+    return YD.AreSeatSleepShortcutButtonsEnabled()
+end
+
+function YD.ReadButtonTooltipsOption(section)
+    section = section or getModOptionsSection(false)
+    local option = getSectionOption(section, YD.OPT_BUTTON_TOOLTIPS_ID)
+    if not option or not option.getValue then
+        YD.SetButtonTooltipsEnabled(true)
+        return YD.AreButtonTooltipsEnabled()
+    end
+
+    local ok, value = pcall(function()
+        return option:getValue()
+    end)
+    if not ok or value == nil then value = true end
+    YD.SetButtonTooltipsEnabled(value == true)
+    return YD.AreButtonTooltipsEnabled()
+end
+
+function YD.ReadEngineConditionHoverOption(section)
+    section = section or getModOptionsSection(false)
+    local option = getSectionOption(section, YD.OPT_ENGINE_CONDITION_HOVER_ID)
+    if not option or not option.getValue then
+        YD.SetEngineConditionHoverEnabled(false)
+        return YD.AreEngineConditionHoverEnabled()
+    end
+
+    local ok, value = pcall(function()
+        return option:getValue()
+    end)
+    if not ok or value == nil then value = false end
+    YD.SetEngineConditionHoverEnabled(value == true)
+    return YD.AreEngineConditionHoverEnabled()
+end
+
 function YD.RegisterTextureSizeOption()
     -- Build 42 normally already has this available.  The guarded require makes
     -- the module harmless in standalone tests and early loading phases.
@@ -335,18 +559,116 @@ function YD.RegisterTextureSizeOption()
     return option
 end
 
+function YD.RegisterShortcutButtonsOption()
+    pcall(require, "PZAPI/ModOptions")
+
+    local section = getModOptionsSection(true)
+    if not section then return nil end
+
+    local option = getSectionOption(section, YD.OPT_SHORTCUT_BUTTONS_ID)
+    if not option and section.addTickBox then
+        pcall(function()
+            if section.addSeparator then section:addSeparator() end
+            if section.addTitle then section:addTitle("Dashboard shortcuts") end
+            if section.addDescription then
+                section:addDescription("Show the seat-switch and sleep shortcuts beside vehicle dashboards.")
+            end
+            option = section:addTickBox(
+                YD.OPT_SHORTCUT_BUTTONS_ID,
+                "Show seat-switch and sleep shortcuts",
+                true
+            )
+        end)
+        option = option or getSectionOption(section, YD.OPT_SHORTCUT_BUTTONS_ID)
+    end
+
+    if not section.__YourDashCoreShortcutApplyWrapped then
+        section.__YourDashCoreShortcutApplyWrapped = true
+        local previousApply = section.apply
+        section.apply = function(self, ...)
+            if previousApply then pcall(previousApply, self, ...) end
+            YD.ReadShortcutButtonsOption(self)
+        end
+    end
+
+    YD.ReadShortcutButtonsOption(section)
+    return option
+end
+
+function YD.RegisterEngineConditionHoverOption()
+    pcall(require, "PZAPI/ModOptions")
+
+    local section = getModOptionsSection(true)
+    if not section then return nil end
+
+    local buttonOption = getSectionOption(section, YD.OPT_BUTTON_TOOLTIPS_ID)
+    local engineOption = getSectionOption(section, YD.OPT_ENGINE_CONDITION_HOVER_ID)
+    if section.addTickBox then
+        pcall(function()
+            if not section.__YourDashCoreTooltipSectionAdded then
+                if section.addSeparator then section:addSeparator() end
+                if section.addTitle then section:addTitle("Tooltips") end
+                if section.addDescription then
+                    section:addDescription("Choose which dashboard tooltips to show.")
+                end
+                section.__YourDashCoreTooltipSectionAdded = true
+            end
+
+            if not buttonOption then
+                buttonOption = section:addTickBox(
+                    YD.OPT_BUTTON_TOOLTIPS_ID,
+                    "Show button tooltips",
+                    true
+                )
+            end
+            if not engineOption then
+                engineOption = section:addTickBox(
+                    YD.OPT_ENGINE_CONDITION_HOVER_ID,
+                    "Show engine condition when hovering mouse over check/stop engine light",
+                    false
+                )
+            end
+        end)
+        buttonOption = buttonOption or getSectionOption(section, YD.OPT_BUTTON_TOOLTIPS_ID)
+        engineOption = engineOption or getSectionOption(section, YD.OPT_ENGINE_CONDITION_HOVER_ID)
+    end
+
+    if not section.__YourDashCoreTooltipApplyWrapped then
+        section.__YourDashCoreTooltipApplyWrapped = true
+        local previousApply = section.apply
+        section.apply = function(self, ...)
+            if previousApply then pcall(previousApply, self, ...) end
+            YD.ReadButtonTooltipsOption(self)
+            YD.ReadEngineConditionHoverOption(self)
+        end
+    end
+
+    YD.ReadButtonTooltipsOption(section)
+    YD.ReadEngineConditionHoverOption(section)
+    return engineOption
+end
+
 function YD.InstallDashboardCoreEvents()
     if YD.__DashboardCoreEventsInstalled then return end
     YD.__DashboardCoreEventsInstalled = true
 
     if Events and Events.OnGameBoot and Events.OnGameBoot.Add then
         pcall(function()
-            Events.OnGameBoot.Add(YD.RegisterTextureSizeOption)
+            Events.OnGameBoot.Add(function()
+                YD.RegisterTextureSizeOption()
+                YD.RegisterShortcutButtonsOption()
+                YD.RegisterEngineConditionHoverOption()
+            end)
         end)
     end
     if Events and Events.OnGameStart and Events.OnGameStart.Add then
         pcall(function()
-            Events.OnGameStart.Add(YD.ReadTextureSizeOption)
+            Events.OnGameStart.Add(function()
+                YD.ReadTextureSizeOption()
+                YD.ReadShortcutButtonsOption()
+                YD.ReadButtonTooltipsOption()
+                YD.ReadEngineConditionHoverOption()
+            end)
         end)
     end
 end

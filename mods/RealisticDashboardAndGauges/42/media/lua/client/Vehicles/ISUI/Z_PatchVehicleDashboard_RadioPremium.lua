@@ -2286,17 +2286,17 @@ function ISVehicleDashboard:_updateRadioControls()
     -- Power
     if self.radioPowerBtn then
         setEnabled(self, self.radioPowerBtn, canToggle,
-            isOn and getText("ContextMenu_Turn_Off") or getText("ContextMenu_Turn_On"),
+            isOn and "Turn off radio" or "Turn on radio",
             ISVehicleDashboard.onClickRadioPowerBasic
         )
     end
 
     -- Volume (does NOT interrupt tune)
     if self.radioVolUpBtn then
-        setEnabled(self, self.radioVolUpBtn, canOperate, getText("IGUI_RadioVolume"), ISVehicleDashboard.onClickRadioVolUp)
+        setEnabled(self, self.radioVolUpBtn, canOperate, "Volume +", ISVehicleDashboard.onClickRadioVolUp)
     end
     if self.radioVolDownBtn then
-        setEnabled(self, self.radioVolDownBtn, canOperate, getText("IGUI_RadioVolume"), ISVehicleDashboard.onClickRadioVolDown)
+        setEnabled(self, self.radioVolDownBtn, canOperate, "Volume -", ISVehicleDashboard.onClickRadioVolDown)
     end
 
     -- Tune

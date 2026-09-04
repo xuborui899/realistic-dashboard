@@ -91,6 +91,13 @@ local function paxUpdateHoverAlpha(element)
     element.alpha = paxIsMouseOver(element) and 1.0 or 0.5
 end
 
+local function paxShowSeatSleepShortcuts()
+    if YourDash and YourDash.AreSeatSleepShortcutButtonsEnabled then
+        return YourDash.AreSeatSleepShortcutButtonsEnabled()
+    end
+    return true
+end
+
 local function paxIsSeatInstalled(vehicle, seat)
     if not vehicle or seat == nil then return false end
     if vehicle.isSeatInstalled then
@@ -201,6 +208,9 @@ YourDashPassengerDashboard.PAX_BTN_EXPAND  = "btn_expand.png"
 YourDashPassengerDashboard.PAX_BTN_MOVE_TO_DRIVER = "btn_move_to_driver.png"
 YourDashPassengerDashboard.PAX_BTN_SLEEP = "btn_sleep.png"
 YourDashPassengerDashboard.PAX_SIDE_BUTTON_GAP = 2
+-- The emergency-light controller sits above the radio.  Reserve enough of
+-- the passenger panel's hit area for it so its controls remain clickable.
+YourDashPassengerDashboard.PAX_ELC_TOP_GUTTER_1X = 80
 
 -- Seat policy: show ONLY for seat index 1 by default (front passenger)
 YourDashPassengerDashboard.PAX_SEAT_INDEX = 1
@@ -327,6 +337,11 @@ YourDashPassengerDashboard.PAX_LAYOUTS_BY_SCALE = {
 function YourDashPassengerDashboard:_paxGetLayout1x()
     local family = self.__YourDashFamily or "standard"
     return self.PAX_LAYOUTS_1X[family] or self.PAX_LAYOUTS_1X.standard
+end
+
+function YourDashPassengerDashboard:_paxGetELCTopGutter(scale)
+    if self.__paxRetracted == true or paxSafeCall(self.vehicle, "hasLightbar") ~= true then return 0 end
+    return paxScaled(self.PAX_ELC_TOP_GUTTER_1X or 80, scale or self.__YourDashScale or paxScale())
 end
 
 local function paxPointXY(point)
@@ -557,6 +572,7 @@ end
 if not ISVehicleDashboard._setImageEnabled then
 	function ISVehicleDashboard:_setImageEnabled(img, enabled, mouseovertext, onclickFn, target)
 		if not img then return end
+		img.__YourDashButtonTooltip = true
 		img.__disabled = not enabled
 		img.target = target or self
 		img.onclick = enabled and onclickFn or nil
@@ -569,6 +585,7 @@ if not ISVehicleDashboard._installPressedEffect then
 	function ISVehicleDashboard:_installPressedEffect(img, pressedScale)
 		if not img or img.__YourDashPressedInstalled then return end
 		img.__YourDashPressedInstalled = true
+		img.__YourDashButtonTooltip = true
 		img.__pressedScale = pressedScale or 0.96
 		img.__pressed = false
 		img.__disabled = img.__disabled or false
@@ -714,6 +731,7 @@ function YourDashPassengerDashboard:new(playerNum, chr)
     o.__paxRetracted = false
     o.__paxChildrenCreated = false
     o.__paxLastBarH = nil
+    o.__paxLastHotbarTop = nil
 
     o.__YourDashFamily = "standard"
     o.__YourDashAccent = "base"
@@ -869,6 +887,7 @@ function YourDashPassengerDashboard:_paxCreateSideButton(texture, onclick, toolt
 end
 
 function YourDashPassengerDashboard:_paxEnsureSideButtons()
+    if not paxShowSeatSleepShortcuts() then return end
     if self.__paxSideButtonsCreated then return end
 
     self.paxMoveSeatBtn = self:_paxCreateSideButton(
@@ -886,6 +905,7 @@ end
 
 function YourDashPassengerDashboard:_paxPositionSideButtons()
     if not self.backgroundTex then return end
+    if not paxShowSeatSleepShortcuts() then return end
     local moveButton = self.paxMoveSeatBtn
     local sleepButton = self.paxSleepBtn
     if not moveButton and not sleepButton then return end
@@ -914,6 +934,26 @@ function YourDashPassengerDashboard:_paxPositionSideButtons()
 end
 
 function YourDashPassengerDashboard:_paxUpdateSideButtons()
+    local showShortcuts = paxShowSeatSleepShortcuts()
+    if self.__paxSideButtonsOptionValue ~= showShortcuts then
+        self.__paxSideButtonsOptionValue = showShortcuts
+        if self.onResolutionChange then self:onResolutionChange() end
+    end
+
+    if not showShortcuts then
+        local function hideButton(button)
+            if button then
+                button:setVisible(false)
+                button.onclick = nil
+                button.mouseovertext = nil
+                button.__disabled = true
+            end
+        end
+        hideButton(self.paxMoveSeatBtn)
+        hideButton(self.paxSleepBtn)
+        return
+    end
+
     self:_paxEnsureSideButtons()
     if self.paxMoveSeatBtn then
         self.paxMoveSeatBtn:setVisible(true)
@@ -934,18 +974,48 @@ function YourDashPassengerDashboard:_paxUpdateSideButtons()
     end
 end
 
-function YourDashPassengerDashboard:_paxGetBarHeight()
-	-- Best-effort: hotbar height (B42 item bar)
-	local h = 0
+function YourDashPassengerDashboard:_paxGetHotbar()
+	if not getPlayerHotbar then return nil end
 
-	if getPlayerHotbar then
-		local hb = getPlayerHotbar(self.playerNum)
-		if hb and (not hb.isVisible or hb:isVisible()) then
-			h = (hb.getHeight and hb:getHeight()) or hb.height or 0
-		end
+	local ok, hotbar = pcall(getPlayerHotbar, self.playerNum)
+	if not ok or not hotbar then return nil end
+	if paxSafeCall(hotbar, "isVisible") == false then return nil end
+	return hotbar
+end
+
+function YourDashPassengerDashboard:_paxGetHotbarTop(screenTop, screenHeight)
+	local hotbar = self:_paxGetHotbar()
+	if not hotbar then return nil end
+
+	-- Some UI mods, including Clean Hot Bar, resize their Lua panel without
+	-- updating the native height immediately.  Its absolute top is the reliable
+	-- boundary that the passenger dashboard must stay above.
+	local top = tonumber(paxSafeCall(hotbar, "getAbsoluteY"))
+		or tonumber(paxSafeCall(hotbar, "getY"))
+	if not top then return nil end
+
+	screenTop = tonumber(screenTop) or 0
+	screenHeight = tonumber(screenHeight) or 0
+	if screenHeight > 0 and (top < screenTop or top > screenTop + screenHeight) then
+		return nil
 	end
 
-	if (not h) or h <= 0 then
+	return top
+end
+
+function YourDashPassengerDashboard:_paxGetBarHeight()
+	-- Best-effort fallback for hotbars that do not expose a usable screen-space Y.
+	local h = 0
+	local hotbar = self:_paxGetHotbar()
+	if hotbar then
+		local nativeHeight = tonumber(paxSafeCall(hotbar, "getHeight")) or 0
+		local luaHeight = 0
+		local ok, value = pcall(function() return hotbar.height end)
+		if ok then luaHeight = tonumber(value) or 0 end
+		h = math.max(nativeHeight, luaHeight)
+	end
+
+	if h <= 0 then
 		local layout = self:_paxGetLayout1x()
 		h = paxScaled(layout.barFallback or 70, self.__YourDashScale or paxScale())
 	end
@@ -1007,6 +1077,17 @@ local function paxMakeImage(parent, texture, opaque)
     image.backgroundColor = opaque and { r=1, g=1, b=1, a=1 } or { r=0, g=0, b=0, a=0 }
     parent:addChild(image)
     return image
+end
+
+local function paxMakeTooltipTarget(parent, width, height)
+    if not ISImage or width <= 0 or height <= 0 then return nil end
+    local target = ISImage:new(0, 0, width, height, nil)
+    target:initialise()
+    target:instantiate()
+    target.backgroundColor = { r=0, g=0, b=0, a=0 }
+    target.__YourDashButtonTooltip = true
+    parent:addChild(target)
+    return target
 end
 
 function YourDashPassengerDashboard:_paxSetSportImage(image, texture, opaque)
@@ -1283,6 +1364,15 @@ function YourDashPassengerDashboard:_paxEnsureSportExtras()
         self:addChild(overlay)
         self.__paxSportOverlay = overlay
     end
+
+    if not self.__paxSportClockTooltip and self.__paxSportClockTex then
+        self.__paxSportClockTooltip = paxMakeTooltipTarget(self,
+            self.__paxSportClockTex:getWidthOrig(), self.__paxSportClockTex:getHeightOrig())
+    end
+    if self.__paxSportClockTooltip and self.__paxSportClockTex then
+        self.__paxSportClockTooltip:setWidth(self.__paxSportClockTex:getWidthOrig())
+        self.__paxSportClockTooltip:setHeight(self.__paxSportClockTex:getHeightOrig())
+    end
 end
 
 function YourDashPassengerDashboard:_paxPositionSportExtras()
@@ -1308,6 +1398,7 @@ function YourDashPassengerDashboard:_paxPositionSportExtras()
     position(self.__paxSportACDisplayButton, ac.displayButton)
     position(self.__paxSportTempKnob, ac.knob)
     position(self.__paxSportDoorLED, layout.doorLED)
+    position(self.__paxSportClockTooltip, layout.clock)
 
     if self.__paxSportOverlay then
         self.__paxSportOverlay:setX(baseX)
@@ -1324,6 +1415,7 @@ function YourDashPassengerDashboard:_paxHideSportExtras()
     if self.__paxSportTempKnob then self.__paxSportTempKnob:setVisible(false) end
     if self.__paxSportDoorLED then self.__paxSportDoorLED:setVisible(false) end
     if self.__paxSportOverlay then self.__paxSportOverlay:setVisible(false) end
+    if self.__paxSportClockTooltip then self.__paxSportClockTooltip:setVisible(false) end
 end
 
 function YourDashPassengerDashboard:_paxUpdateSportExtras(hasBatteryPower)
@@ -1342,6 +1434,13 @@ function YourDashPassengerDashboard:_paxUpdateSportExtras(hasBatteryPower)
     self:_paxSetSportImage(self.__paxSportACBackground, backgroundTexture, true)
     if self.__paxSportACBackground then self.__paxSportACBackground:setVisible(true) end
 
+    if self.__paxSportClockTooltip then
+        local showTooltip = not YourDash.AreButtonTooltipsEnabled or YourDash.AreButtonTooltipsEnabled()
+        self.__paxSportClockTooltip.mouseovertext = showTooltip and
+            (YourDash.GetClockTime12Hour and YourDash.GetClockTime12Hour()) or nil
+        self.__paxSportClockTooltip:setVisible(showTooltip)
+    end
+
     local hasHeater = heater ~= nil
     local powered = self.vehicle and
         (paxSafeCall(self.vehicle, "isEngineRunning") == true or
@@ -1352,6 +1451,9 @@ function YourDashPassengerDashboard:_paxUpdateSportExtras(hasBatteryPower)
         self.__paxSportFanButton.__disabled = not powered
         self.__paxSportFanButton.target = self
         self.__paxSportFanButton.onclick = powered and YourDashPassengerDashboard.onPaxSportFan or nil
+        self.__paxSportFanButton.mouseovertext = powered and
+            (active and "Turn off A/C" or "Turn on A/C") or
+            getText("UI_Vehicle_HeaterNeedKey")
     end
     if self.__paxSportACDisplayButton then
         self.__paxSportACDisplayButton:setVisible(hasHeater)
@@ -1683,15 +1785,16 @@ function YourDashPassengerDashboard:onResolutionChange()
     if (TX or 0) < 0 then leftGutter = math.ceil(-(TX or 0)) end
     self.__paxLeftGutter = leftGutter
 
-    self:_paxEnsureSideButtons()
+    local showShortcuts = paxShowSeatSleepShortcuts()
+    if showShortcuts then self:_paxEnsureSideButtons() end
     local actionGap = math.max(1, paxScaled(self.PAX_SIDE_BUTTON_GAP or 2, scale))
     local actionW = 0
     local actionBottom = 0
-    if self.paxMoveSeatBtn then
+    if showShortcuts and self.paxMoveSeatBtn then
         actionW = math.max(actionW, self.paxMoveSeatBtn:getWidth())
         actionBottom = actionBottom + self.paxMoveSeatBtn:getHeight()
     end
-    if self.paxSleepBtn then
+    if showShortcuts and self.paxSleepBtn then
         actionW = math.max(actionW, self.paxSleepBtn:getWidth())
         actionBottom = actionBottom + self.paxSleepBtn:getHeight()
     end
@@ -1700,21 +1803,30 @@ function YourDashPassengerDashboard:onResolutionChange()
 
     local bgW = self.backgroundTex:getWidth()
     local bgH = self.backgroundTex:getHeight()
+	local topGutter = self:_paxGetELCTopGutter(scale)
 	self:setWidth(bgW + leftGutter + rightGutter)
-	self:setHeight(math.max(bgH, actionBottom))
+	self:setHeight(topGutter + math.max(bgH, actionBottom))
 
 	local barH = self:_paxGetBarHeight()
+	local hotbarTop = self:_paxGetHotbarTop(screenTop, screenHeight)
     local pad  = PAD or 0
 
     local x = screenLeft + (screenWidth - bgW) / 2 - leftGutter + (OFFX or 0)
-    local y = screenTop + screenHeight - bgH - barH - pad + (OFFY or 0)
+    local y
+    if hotbarTop then
+        y = hotbarTop - bgH - pad + (OFFY or 0) - topGutter
+    else
+        y = screenTop + screenHeight - bgH - barH - pad + (OFFY or 0) - topGutter
+    end
+	self.__paxLastBarH = barH
+	self.__paxLastHotbarTop = hotbarTop
 
 	self:setX(x)
 	self:setY(y)
 
 	-- background local origin
 	self.backgroundTex:setX(leftGutter)
-	self.backgroundTex:setY(0)
+	self.backgroundTex:setY(topGutter)
 
 	-- Toggle button
     if self.paxToggleBtn then
@@ -1779,16 +1891,25 @@ function YourDashPassengerDashboard:prerender()
 		return
 	end
 
-	-- Hotbar height can change (rare): reposition if it does
+	-- Follow the visible hotbar boundary.  Clean Hot Bar can change its screen
+	-- position while keeping the native panel height unchanged.
+	local screenTop = getPlayerScreenTop(self.playerNum)
+	local screenHeight = getPlayerScreenHeight(self.playerNum)
 	local barH = self:_paxGetBarHeight()
-	if self.__paxLastBarH ~= barH then
-		self.__paxLastBarH = barH
+	local hotbarTop = self:_paxGetHotbarTop(screenTop, screenHeight)
+	if self.__paxLastBarH ~= barH or self.__paxLastHotbarTop ~= hotbarTop then
 		self:onResolutionChange()
 	end
 
 	self:_paxRefreshToggleTexture()
     self:_paxUpdateSideButtons()
     self:_paxPositionSideButtons()
+    if YourDash.KeepHoveredHotbarAboveDashboard then
+        YourDash.KeepHoveredHotbarAboveDashboard(self)
+    end
+    if YourDash.InstallCompactTooltipTree then
+        YourDash.InstallCompactTooltipTree(self, self)
+    end
 
 	-- Retracted: show only background + toggle
 	if self.__paxRetracted then

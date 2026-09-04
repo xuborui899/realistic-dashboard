@@ -1,6 +1,10 @@
 -- media/lua/client/YourDash/Z_PatchVehicleDashboard.lua
 if isServer() then return end
 
+-- Temporary diagnostic for validating the game's vehicle-speed API.  This is
+-- intentionally throttled below so a driving test does not flood the console.
+local YOURDASH_LOG_VEHICLE_SPEED = true
+
 -- Load vanilla
 require "Vehicles/ISUI/ISVehicleDashboard"
 require "Vehicles/ISUI/ISVehiclePartMenu"
@@ -62,6 +66,13 @@ end
 local function YourDash_UpdateHoverAlpha(element)
     if not element then return end
     element.alpha = YourDash_IsMouseOver(element) and 1.0 or 0.5
+end
+
+local function YourDash_ShowSeatSleepShortcuts()
+    if YourDash and YourDash.AreSeatSleepShortcutButtonsEnabled then
+        return YourDash.AreSeatSleepShortcutButtonsEnabled()
+    end
+    return true
 end
 
 local function YourDash_IsSeatInstalled(vehicle, seat)
@@ -241,6 +252,7 @@ local function YourDash_RegisterModOptions()
         if sec and (not sec.__YourDash_Added) then
             sec.__YourDash_Added = true
 
+            if sec.addSeparator then sec:addSeparator() end
             sec:addTitle("Damage overlays")
             sec:addDescription("Choose effect opacity for dynamic cracks and stains.")
             local wear = sec:addComboBox(YourDash.OPT_WEARFX_ID, "Cracks & stains intensity", nil)
@@ -369,6 +381,86 @@ function ISVehicleDashboard:_newWarnImage(tex)
     end
     self:addChild(img)
     return img
+end
+
+function ISVehicleDashboard:_YourDashEnsureEngineConditionHoverTargets()
+    local function ensure(field)
+        local target = self[field]
+        if target then return target end
+
+        -- This is intentionally an empty ISImage rather than a warning texture:
+        -- it receives hover input above the glass/needle layers without changing
+        -- the authored warning-light artwork.
+        target = ISImage:new(0, 0, 1, 1, nil)
+        target:initialise()
+        target:instantiate()
+        target.target = self
+        target.onclick = nil
+        target.mouseovertext = nil
+        target.backgroundColor = { r=1, g=1, b=1, a=0 }
+        target.borderColor = { r=1, g=1, b=1, a=0 }
+        target.doBorder = false
+        target.wantMouseEvents = true
+        if target.setWantMouseEvents then target:setWantMouseEvents(true) end
+        target.__YourDashEngineConditionHover = true
+        target:setVisible(false)
+        self:addChild(target)
+        self[field] = target
+        return target
+    end
+
+    ensure("__YourDashCheckEngineHoverTarget")
+    ensure("__YourDashStopEngineHoverTarget")
+end
+
+function ISVehicleDashboard:_YourDashPositionEngineConditionHoverTargets()
+    local function position(target, warning)
+        if not target then return end
+        if not warning then
+            target:setVisible(false)
+            target.mouseovertext = nil
+            return
+        end
+
+        target:setX(warning:getX())
+        target:setY(warning:getY())
+        target:setWidth(math.max(1, warning:getWidth()))
+        target:setHeight(math.max(1, warning:getHeight()))
+
+        -- The wear overlay is deliberately above the instruments.  Keep the
+        -- invisible hit target above it so cracks, stains, and needles cannot
+        -- intercept the engine-warning hover.
+        if target.bringToTop then target:bringToTop() end
+    end
+
+    position(self.__YourDashCheckEngineHoverTarget, self.warnCheckTex)
+    position(self.__YourDashStopEngineHoverTarget, self.warnStopTex)
+end
+
+function ISVehicleDashboard:_YourDashUpdateEngineConditionHoverTargets(checkOn, stopOn, engineCondition)
+    self:_YourDashEnsureEngineConditionHoverTargets()
+
+    local enabled = YourDash and YourDash.AreEngineConditionHoverEnabled and
+        YourDash.AreEngineConditionHoverEnabled() == true
+    local condition = math.floor(math.max(0, math.min(100, tonumber(engineCondition) or 0)) + 0.5)
+    local tooltip = string.format("engine condition: %d%%", condition)
+
+    local function update(target, warningOn)
+        if not target then return end
+        local show = enabled and warningOn == true
+        target.mouseovertext = show and tooltip or nil
+        target:setVisible(show)
+        if not show then
+            target.mouseover = false
+            if target.tooltipUI and target.tooltipUI:getIsVisible() then
+                target.tooltipUI:setVisible(false)
+                target.tooltipUI:removeFromUIManager()
+            end
+        end
+    end
+
+    update(self.__YourDashCheckEngineHoverTarget, checkOn)
+    update(self.__YourDashStopEngineHoverTarget, stopOn)
 end
 
 function ISVehicleDashboard:_setWarn(img, on, tooltip, alphaMul, dt)
@@ -711,6 +803,7 @@ function ISVehicleDashboard:onYourDashSleep()
 end
 
 function ISVehicleDashboard:_YourDashEnsureSideButtons()
+    if not YourDash_ShowSeatSleepShortcuts() then return end
     if self.__YourDashSideButtonsCreated then return end
 
     local function makeButton(texture, onclick, tooltip)
@@ -744,6 +837,7 @@ end
 
 function ISVehicleDashboard:_YourDashPositionSideButtons()
     if not self.backgroundTex then return end
+    if not YourDash_ShowSeatSleepShortcuts() then return end
     local seatButton = self.__YourDashMoveSeatButton
     local sleepButton = self.__YourDashSleepButton
     if not seatButton and not sleepButton then return end
@@ -781,6 +875,26 @@ function ISVehicleDashboard:_YourDashPositionSideButtons()
 end
 
 function ISVehicleDashboard:_YourDashUpdateSideButtons()
+    local showShortcuts = YourDash_ShowSeatSleepShortcuts()
+    if self.__YourDashSideButtonsOptionValue ~= showShortcuts then
+        self.__YourDashSideButtonsOptionValue = showShortcuts
+        if self.onResolutionChange then self:onResolutionChange() end
+    end
+
+    if not showShortcuts then
+        local function hideButton(button)
+            if button then
+                button:setVisible(false)
+                button.onclick = nil
+                button.mouseovertext = nil
+                button.__disabled = true
+            end
+        end
+        hideButton(self.__YourDashMoveSeatButton)
+        hideButton(self.__YourDashSleepButton)
+        return
+    end
+
     self:_YourDashEnsureSideButtons()
 
     if self.__YourDashMoveSeatButton then
@@ -1055,6 +1169,7 @@ end
 function ISVehicleDashboard:_installPressedEffect(img, pressedScale)
     if not img or img.__YourDashPressedInstalled then return end
     img.__YourDashPressedInstalled = true
+    img.__YourDashButtonTooltip = true
     img.__pressedScale = pressedScale or 0.96
     img.__pressed = false
     img.__disabled = img.__disabled or false
@@ -1118,6 +1233,7 @@ end
 
 function ISVehicleDashboard:_setImageEnabled(img, enabled, mouseovertext, onclickFn, target)
     if not img then return end
+    img.__YourDashButtonTooltip = true
     img.__disabled = not enabled
     img.target = target or self
     img.onclick = enabled and onclickFn or nil
@@ -1972,16 +2088,18 @@ function ISVehicleDashboard:createChildren()
             local speedVal = math.max(0, math.min(1, dash.speedValue or 0.0))
             local fuelVal = math.max(0, math.min(1, dash.fuelValue or 0.0))
             local rpm = rpmVal * 7000
-            local mph = math.max(0, dash.__YourDashSmoothMPH or 0)
+            -- Match vanilla: its MPH-marked dashboard is driven directly by
+            -- getCurrentSpeedKmHour()'s raw numeric value.
+            local vanillaSpeed = math.max(0, dash.__YourDashSmoothDisplaySpeed or 0)
             local volts = dash.__YourDashVoltage or 8.0
 
             local rpmAngle, speedAngle, fuelAngle, voltageAngle
             if family == "heavy" then
                 rpmAngle = -30 + math.min(rpm, 6000) / 6000 * 240
-                if mph <= 5 then
+                if vanillaSpeed <= 5 then
                     speedAngle = -30
                 else
-                    speedAngle = -30 + ((math.min(mph, 90) - 5) / 10) * 30
+                    speedAngle = -30 + ((math.min(vanillaSpeed, 90) - 5) / 10) * 30
                 end
                 -- Heavy short-needle artwork is authored pointing +90 degrees
                 -- at texture angle zero.  Subtract that baked-in direction so
@@ -1991,18 +2109,18 @@ function ISVehicleDashboard:createChildren()
                 voltageAngle = (25 + math.max(0, math.min(1, (volts - 8) / 10)) * 130) - 90
             elseif family == "sport" then
                 rpmAngle = -45 + math.min(rpm, 7000) / 7000 * 270
-                speedAngle = -45 + math.min(mph, 160) / 160 * 270
+                speedAngle = -45 + math.min(vanillaSpeed, 160) / 160 * 270
                 fuelAngle = -65 + fuelVal * 130
                 voltageAngle = 245 - math.max(0, math.min(1, (volts - 8) / 8)) * 130
             else
                 -- Preserve the proven standard-dash mappings exactly.
                 rpmAngle = math.deg(dash.RPM_MIN_ANGLE + (dash.RPM_MAX_ANGLE - dash.RPM_MIN_ANGLE) * rpmVal)
                 fuelAngle = math.deg(dash.FUEL_MIN_ANGLE + (dash.FUEL_MAX_ANGLE - dash.FUEL_MIN_ANGLE) * fuelVal)
-                local legacyMph = speedVal * 120.0
-                if legacyMph <= 20.0 then
-                    speedAngle = legacyMph * 1.125
+                local vanillaDisplaySpeed = speedVal * 120.0
+                if vanillaDisplaySpeed <= 20.0 then
+                    speedAngle = vanillaDisplaySpeed * 1.125
                 else
-                    speedAngle = 22.5 + (legacyMph - 20.0) * 1.875
+                    speedAngle = 22.5 + (vanillaDisplaySpeed - 20.0) * 1.875
                 end
                 if speedAngle < 0 then speedAngle = 0 elseif speedAngle > 210 then speedAngle = 210 end
             end
@@ -2253,6 +2371,7 @@ function ISVehicleDashboard:createChildren()
 
     self:_YourDashEnsureGlassOverlay()
     self:_YourDashEnsureStateLEDs()
+    self:_YourDashEnsureEngineConditionHoverTargets()
     self:_YourDashPositionGlassOverlay()
     self:_YourDashFinalizeWearOrder()
 
@@ -2268,7 +2387,7 @@ function ISVehicleDashboard:setVehicle(vehicle)
     _oldSetVehicle(self, vehicle)
 
     if previousVehicle ~= vehicle then
-        self.__YourDashSmoothMPH, self.__YourDashSmoothMPHVel = 0.0, 0.0
+        self.__YourDashSmoothDisplaySpeed, self.__YourDashSmoothDisplaySpeedVel = 0.0, 0.0
         self.__YourDashBatterySampleCharge = nil
         self.__YourDashBatterySampleAge = nil
         self.__YourDashMeasuredDrop = nil
@@ -2295,7 +2414,7 @@ function ISVehicleDashboard:setVehicle(vehicle)
     if not vehicle then
         self.rpmValue, self.rpmVel = 0.0, 0.0
         self.speedValue, self.speedVel = 0.0, 0.0
-        self.__YourDashSmoothMPH, self.__YourDashSmoothMPHVel = 0.0, 0.0
+        self.__YourDashSmoothDisplaySpeed, self.__YourDashSmoothDisplaySpeedVel = 0.0, 0.0
         self.__YourDashBatterySampleCharge = nil
         self.__YourDashBatterySampleAge = nil
         self.__YourDashMeasuredDrop = nil
@@ -2321,7 +2440,12 @@ end
 -- =========================
 local _oldPrerender = ISVehicleDashboard.prerender
 function ISVehicleDashboard:prerender()
-    if not self.vehicle or not ISUIHandler.allUIVisible then return end
+    if not self.vehicle or not ISUIHandler.allUIVisible then
+        if self._YourDashUpdateEngineConditionHoverTargets then
+            self:_YourDashUpdateEngineConditionHoverTargets(false, false)
+        end
+        return
+    end
     -- Script identity may change in place for debug-respawned vehicles.  Core
     -- validates its cache identity; re-read the lightweight profile each frame
     -- so this dashboard can swap family/accent without a new vehicle object.
@@ -2354,17 +2478,28 @@ function ISVehicleDashboard:prerender()
     local engineSpeedValue = 0.0
     local speedValue = 0.0
     self.__YourDashRPM = 0
-    self.__YourDashSpeedMPH = 0
+    self.__YourDashDisplaySpeed = 0
+    local rawSpeedKph = tonumber(self.vehicle:getCurrentSpeedKmHour()) or 0
+    local speedKph = math.abs(rawSpeedKph)
     if self.vehicle:isEngineRunning() then
         self.__YourDashRPM = math.max(0, self.vehicle:getEngineSpeed() or 0)
-        local speedKph = math.abs(self.vehicle:getCurrentSpeedKmHour() or 0)
-        self.__YourDashSpeedMPH = speedKph * 0.621371192237
+        self.__YourDashDisplaySpeed = speedKph
         engineSpeedValue = math.max(0, math.min(1, self.__YourDashRPM / 7000))
+        -- Keep the standard dashboard on vanilla's raw km/h-as-MPH behavior.
         speedValue = math.max(0, math.min(1, speedKph / 120))
     end
 
     local dt = UIManager.getSecondsSinceLastRender()
     if not dt or dt <= 0 then dt = 1/30 end
+    if YOURDASH_LOG_VEHICLE_SPEED then
+        self.__YourDashSpeedLogAge = (self.__YourDashSpeedLogAge or 0) + dt
+        if self.__YourDashSpeedLogAge >= 1 then
+            self.__YourDashSpeedLogAge = 0
+            print(string.format(
+                "[RealisticDash] getCurrentSpeedKmHour raw=%.2f | vanilla MPH display=%.2f | needle=%.4f",
+                rawSpeedKph, self.__YourDashDisplaySpeed or 0, speedValue))
+        end
+    end
     if (self.__YourDashHeadlightSwitchPending or 0) > 0 then
         self.__YourDashHeadlightSwitchPending = math.max(0,
             self.__YourDashHeadlightSwitchPending - math.min(dt, 0.25))
@@ -2418,13 +2553,13 @@ function ISVehicleDashboard:prerender()
     local st2 = (speedValue > self.speedValue) and needleSmoothUp or needleSmoothDown
     self.speedValue, self.speedVel = self._smoothDamp(self.speedValue, speedValue, self.speedVel, st2, self.NEEDLE_MAXSPEED, dt)
 
-    local targetMph = self.__YourDashSpeedMPH or 0
-    self.__YourDashSmoothMPH = self.__YourDashSmoothMPH or targetMph
-    self.__YourDashSmoothMPHVel = self.__YourDashSmoothMPHVel or 0
-    local mphSmooth = (targetMph > self.__YourDashSmoothMPH) and needleSmoothUp or needleSmoothDown
-    self.__YourDashSmoothMPH, self.__YourDashSmoothMPHVel = self._smoothDamp(
-        self.__YourDashSmoothMPH, targetMph, self.__YourDashSmoothMPHVel,
-        mphSmooth, self.NEEDLE_MAXSPEED, dt)
+    local targetDisplaySpeed = self.__YourDashDisplaySpeed or 0
+    self.__YourDashSmoothDisplaySpeed = self.__YourDashSmoothDisplaySpeed or targetDisplaySpeed
+    self.__YourDashSmoothDisplaySpeedVel = self.__YourDashSmoothDisplaySpeedVel or 0
+    local displaySmooth = (targetDisplaySpeed > self.__YourDashSmoothDisplaySpeed) and needleSmoothUp or needleSmoothDown
+    self.__YourDashSmoothDisplaySpeed, self.__YourDashSmoothDisplaySpeedVel = self._smoothDamp(
+        self.__YourDashSmoothDisplaySpeed, targetDisplaySpeed, self.__YourDashSmoothDisplaySpeedVel,
+        displaySmooth, self.NEEDLE_MAXSPEED, dt)
 
 
     -- Door icon (don't swap when no power)
@@ -2652,6 +2787,7 @@ function ISVehicleDashboard:prerender()
                 self:_setWarn(self.warnDoorTex,    false)
                 self:_setWarn(self.warnFuelTex,    false)
                 self:_setWarn(self.warnLightTex,   false)
+                self:_YourDashUpdateEngineConditionHoverTargets(false, false)
             else
                 -- Start bulb-check exactly when cranking begins
                 if cranking and (not self.__warnChkPrevCranking) then
@@ -2824,6 +2960,7 @@ function ISVehicleDashboard:prerender()
                 apply("door",    self.warnDoorTex,    doorOn,    "Door open")
                 apply("fuel",    self.warnFuelTex,    fuelOn,    "Low fuel")
                 apply("light",   self.warnLightTex,   lightOn,   "Headlights on")
+                self:_YourDashUpdateEngineConditionHoverTargets(checkOn, stopOn, engCond)
             end
         end
     end
@@ -3016,6 +3153,9 @@ function ISVehicleDashboard:onResolutionChange()
         end
         if self._YourDashPositionGlassOverlay then self:_YourDashPositionGlassOverlay() end
         if self._YourDashFinalizeWearOrder then self:_YourDashFinalizeWearOrder() end
+        if self._YourDashPositionEngineConditionHoverTargets then
+            self:_YourDashPositionEngineConditionHoverTargets()
+        end
     end
     self:_YourDashPositionSideButtons()
 

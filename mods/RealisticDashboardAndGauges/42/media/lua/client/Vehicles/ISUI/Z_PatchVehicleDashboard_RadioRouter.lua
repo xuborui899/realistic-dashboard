@@ -265,6 +265,9 @@ function ISVehicleDashboard:prerender()
         return
     end
     self:_yourDashUpdateRoutedRadio()
+    if YourDash.KeepHoveredHotbarAboveDashboard then
+        YourDash.KeepHoveredHotbarAboveDashboard(self)
+    end
     if ELC then ELC.Update(self, true) end
 end
 

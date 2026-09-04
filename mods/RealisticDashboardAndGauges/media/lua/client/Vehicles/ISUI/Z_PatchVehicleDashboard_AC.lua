@@ -366,7 +366,7 @@ function ISVehicleDashboard:_updateACControls()
             self.heaterTex.mouseovertext = getText("UI_Vehicle_HeaterNeedKey")
         else
             -- keep tooltip logic as-is (even if texture is frozen)
-            self.heaterTex.mouseovertext = active and getText("ContextMenu_Turn_Off") or getText("ContextMenu_Turn_On")
+            self.heaterTex.mouseovertext = active and "Turn off A/C" or "Turn on A/C"
         end
 
         self.heaterTex.backgroundColor = { r=0, g=0, b=0, a=0 }

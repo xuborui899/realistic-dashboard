@@ -271,6 +271,7 @@ function ISVehicleDashboard:_updateACControls()
     end
     if not heater then
         if self.heaterTex then
+            self.heaterTex.__YourDashButtonTooltip = true
             if self.__fan_off and self.heaterTex.texture ~= self.__fan_off then
                 setImage(self, self.heaterTex, self.__fan_off)
             end
@@ -294,12 +295,13 @@ function ISVehicleDashboard:_updateACControls()
     if self.heaterTex and texture and self.heaterTex.texture ~= texture then setImage(self, self.heaterTex, texture) end
 
     if self.heaterTex then
+        self.heaterTex.__YourDashButtonTooltip = true
         local canToggle = self.vehicle:isEngineRunning() or self.vehicle:isKeysInIgnition()
         self.heaterTex.__disabled = not canToggle
         self.heaterTex.onclick = canToggle and ISVehicleDashboard.onClickACFan or nil
         self.heaterTex.target = self
         self.heaterTex.mouseovertext = canToggle and
-            (active and getText("ContextMenu_Turn_Off") or getText("ContextMenu_Turn_On")) or
+            (active and "Turn off A/C" or "Turn on A/C") or
             getText("UI_Vehicle_HeaterNeedKey")
     end
 

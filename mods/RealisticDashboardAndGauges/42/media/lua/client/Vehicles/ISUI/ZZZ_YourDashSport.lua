@@ -32,9 +32,10 @@ local AC_MODE_COUNT = 3
 local AC_RAW_LEVELS = { -25, -15, -8, 0, 8, 15, 25 }
 local AC_RELATIVE_LEVELS = { -3, -2, -1, 0, 1, 2, 3 }
 local MPG_KM_PER_LITRE_TO_US = 2.352145833
+local MILES_TO_KILOMETRES = 1.609344
 local SPORT_FAST_REFRESH_SECONDS = 0.5
 local SPORT_AVERAGE_REFRESH_SECONDS = 5
-local SPORT_TRIP_STATE_VERSION = 3
+local SPORT_TRIP_STATE_VERSION = 7
 local DEGREE_SYMBOL = "\194\176"
 local SPORT_VEHICLE_STATES = ISVehicleDashboard.__YourDashSportVehicleStates or {}
 ISVehicleDashboard.__YourDashSportVehicleStates = SPORT_VEHICLE_STATES
@@ -183,8 +184,8 @@ local function getElapsedGameMinutes(dt)
 end
 
 -- Mirror vanilla Vehicles.Update.GasTank without SandboxVars.CarGasConsumption.
--- The dashboard applies its own normalization so MPG stays comparable across
--- different vehicle-fuel-consumption sandbox settings.
+-- This stays in the game's native speed units because it estimates the fuel
+-- rate, rather than an instrument-display value.
 local function estimateFuelPerGameMinuteAtOneMultiplier(vehicle)
     if not vehicle or safeCall(vehicle, "isEngineRunning") ~= true then return 0 end
 
@@ -237,6 +238,8 @@ end
 local function estimateCurrentMpgAtOneMultiplier(vehicle)
     if not vehicle or safeCall(vehicle, "isEngineRunning") ~= true then return 0 end
 
+    -- Fuel economy uses the vehicle's real native km/h value rather than the
+    -- intentionally vanilla-style MPH number shown by the instrument UI.
     local speedKph = math.abs(finiteNumber(safeCall(vehicle, "getCurrentSpeedKmHour")) or 0)
     if speedKph < 0.5 then return 0 end
 
@@ -371,6 +374,17 @@ local function makeImage(dashboard, texture)
     image.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
     dashboard:addChild(image)
     return image
+end
+
+local function makeTooltipTarget(dashboard, width, height)
+    if not ISImage or width <= 0 or height <= 0 then return nil end
+    local target = ISImage:new(0, 0, width, height, nil)
+    target:initialise()
+    target:instantiate()
+    target.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+    target.__YourDashButtonTooltip = true
+    dashboard:addChild(target)
+    return target
 end
 
 local function newSportCache()
@@ -510,9 +524,9 @@ function ISVehicleDashboard:_YourDashSportRefreshCaches(dt)
 
     if cache.fastAge >= SPORT_FAST_REFRESH_SECONDS then
         cache.fastAge = cache.fastAge - SPORT_FAST_REFRESH_SECONDS
-        local kph = math.abs(finiteNumber(safeCall(self.vehicle, "getCurrentSpeedKmHour")) or 0)
-        cache.kph = clamp(kph, 0, 199)
-        cache.mph = clamp(kph * 0.621371192237, 0, 199)
+        local rawSpeedKph = math.abs(finiteNumber(safeCall(self.vehicle, "getCurrentSpeedKmHour")) or 0)
+        cache.mph = clamp(rawSpeedKph, 0, 199)
+        cache.kph = clamp(rawSpeedKph * MILES_TO_KILOMETRES, 0, 199)
         if safeCall(self.vehicle, "isEngineRunning") == true then
             local instantMpg = estimateCurrentMpgAtOneMultiplier(self.vehicle)
             if instantMpg ~= nil then cache.instantMpg = instantMpg end
@@ -947,6 +961,16 @@ function ISVehicleDashboard:_YourDashSportEnsureControls()
         self.__YourDashSportOverlay = layer
     end
 
+    if not self.__YourDashSportClockTooltip and textures.clock then
+        local width, height = actualTextureSize(textures.clock)
+        self.__YourDashSportClockTooltip = makeTooltipTarget(self, width, height)
+    end
+    if self.__YourDashSportClockTooltip and textures.clock then
+        local width, height = actualTextureSize(textures.clock)
+        self.__YourDashSportClockTooltip:setWidth(width)
+        self.__YourDashSportClockTooltip:setHeight(height)
+    end
+
     if not self.__YourDashSportGaugeDisplayButton and textures.gaugeDisplayButton then
         local button = makeImage(self, textures.gaugeDisplayButton)
         button.target = self
@@ -1011,6 +1035,10 @@ function ISVehicleDashboard:_YourDashSportPositionControls()
     position(self.__YourDashSportFanButton, "ac", "fan", ac.fan)
     position(self.__YourDashSportACDisplayButton, "ac", "displayButton", ac.displayButton)
     position(self.__YourDashSportTempKnob, "ac", "knob", ac.knob)
+    if self.__YourDashSportClockTooltip and layout.clock and layout.clock.background then
+        self.__YourDashSportClockTooltip:setX(baseX + scaled(layout.clock.background.x or 0))
+        self.__YourDashSportClockTooltip:setY(baseY + scaled(layout.clock.background.y or 0))
+    end
 
     if self.__YourDashSportOverlay then
         self.__YourDashSportOverlay:setX(baseX)
@@ -1033,6 +1061,12 @@ function ISVehicleDashboard:_YourDashSportUpdateVisibility()
     if self.__YourDashSportFanButton then self.__YourDashSportFanButton:setVisible(sport and hasHeater) end
     if self.__YourDashSportACDisplayButton then self.__YourDashSportACDisplayButton:setVisible(sport and hasHeater) end
     if self.__YourDashSportTempKnob then self.__YourDashSportTempKnob:setVisible(sport and hasHeater) end
+    if self.__YourDashSportClockTooltip then
+        local showTooltip = sport and (not YourDash.AreButtonTooltipsEnabled or YourDash.AreButtonTooltipsEnabled())
+        self.__YourDashSportClockTooltip.mouseovertext = showTooltip and
+            (YourDash.GetClockTime12Hour and YourDash.GetClockTime12Hour()) or nil
+        self.__YourDashSportClockTooltip:setVisible(showTooltip)
+    end
 
     if sport then
         -- These are the standard/heavy linear controls owned by the existing
@@ -1063,6 +1097,9 @@ function ISVehicleDashboard:_YourDashSportUpdateAC()
         self.__YourDashSportFanButton.__disabled = not powered
         self.__YourDashSportFanButton.onclick = powered and ISVehicleDashboard.onYourDashSportFan or nil
         self.__YourDashSportFanButton.target = self
+        self.__YourDashSportFanButton.mouseovertext = powered and
+            (active and "Turn off A/C" or "Turn on A/C") or
+            getText("UI_Vehicle_HeaterNeedKey")
     end
     if self.__YourDashSportTempKnob then
         self.__YourDashSportTempKnob.__disabled = not powered
@@ -1134,6 +1171,9 @@ function ISVehicleDashboard:prerender()
     self:_YourDashSportPositionControls()
     self:_YourDashSportUpdateVisibility()
     if self._YourDashFinalizeWearOrder then self:_YourDashFinalizeWearOrder() end
+    if YourDash.InstallCompactTooltipTree then
+        YourDash.InstallCompactTooltipTree(self, self)
+    end
     if (self.__YourDashFamily or "standard") ~= "sport" then return end
 
     local dt = UIManager and UIManager.getSecondsSinceLastRender and UIManager.getSecondsSinceLastRender() or (1 / 30)

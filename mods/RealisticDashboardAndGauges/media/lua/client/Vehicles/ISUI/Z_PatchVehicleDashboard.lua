@@ -1,6 +1,10 @@
 -- media/lua/client/YourDash/Z_PatchVehicleDashboard.lua
 if isServer() then return end
 
+-- Temporary diagnostic for validating the game's vehicle-speed API.  This is
+-- intentionally throttled below so a driving test does not flood the console.
+local YOURDASH_LOG_VEHICLE_SPEED = true
+
 -- Load vanilla
 require "Vehicles/ISUI/ISVehicleDashboard"
 require "Vehicles/ISUI/ISVehiclePartMenu"
@@ -1203,13 +1207,25 @@ function ISVehicleDashboard:prerender()
 
     local engineSpeedValue = 0.0
     local speedValue = 0.0
+    local rawSpeedKph = tonumber(self.vehicle:getCurrentSpeedKmHour()) or 0
+    local speedKph = math.abs(rawSpeedKph)
     if self.vehicle:isEngineRunning() then
         engineSpeedValue = math.max(0, math.min(1, (self.vehicle:getEngineSpeed() - 0) / (7000 - 0)))
-        speedValue       = math.max(0, math.min(1, math.abs(self.vehicle:getCurrentSpeedKmHour()) / 120))
+        -- Mirror vanilla's raw km/h-as-MPH dashboard behavior.
+        speedValue = math.max(0, math.min(1, speedKph / 120))
     end
 
     local dt = UIManager.getSecondsSinceLastRender()
     if not dt or dt <= 0 then dt = 1/30 end
+    if YOURDASH_LOG_VEHICLE_SPEED then
+        self.__YourDashSpeedLogAge = (self.__YourDashSpeedLogAge or 0) + dt
+        if self.__YourDashSpeedLogAge >= 1 then
+            self.__YourDashSpeedLogAge = 0
+            print(string.format(
+                "[RealisticDash] getCurrentSpeedKmHour raw=%.2f | vanilla MPH display=%.2f | needle=%.4f",
+                rawSpeedKph, speedKph, speedValue))
+        end
+    end
 
     self:_updateStainLayer()
     self:_updateCrackLayer()

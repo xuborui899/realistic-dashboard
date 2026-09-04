@@ -192,6 +192,7 @@ end
 function Controller:_createToggle()
     local image = self:_newImage(self.__textures.collapse, false)
     image.__controller = self
+    image.__YourDashButtonTooltip = true
     image.__pressed = false
     image.mouseovertext = "collapse emergency light controller"
 
@@ -239,6 +240,7 @@ function Controller:_createSirenButton(key, definition)
     hit:instantiate()
     hit.__controller = self
     hit.__buttonKey = key
+    hit.__YourDashButtonTooltip = true
     hit.__pressed = false
     hit.backgroundColor = { r = 1, g = 1, b = 1, a = 0 }
     hit.mouseovertext = definition.tooltip()
@@ -291,6 +293,7 @@ function Controller:_createKnob()
     knob:initialise()
     knob:instantiate()
     knob.target = self
+    knob.__YourDashButtonTooltip = true
     knob.switchSound = "VehicleSetLights"
     -- DrawTextureAngle rotates the supplied upright handle clockwise.
     -- OFF is west, then 1, 2, and 3 sweep clockwise across the top to east.
@@ -573,18 +576,28 @@ end
 function Controller:_setManaged(active)
     self.__active = active == true
     if self.__active then
-        self:setVisible(true)
-        if not self.__managed and self.addToUIManager then
-            self:addToUIManager()
-            self.__managed = true
-            if self.bringToTop then self:bringToTop() end
+        local owner = self.owner
+        if owner and owner.addChild then
+            -- This must live inside the dashboard rather than the global UI
+            -- manager, otherwise it can draw over unrelated map/UI layers.
+            if self.__managed and self.removeFromUIManager then
+                self:removeFromUIManager()
+                self.__managed = false
+            end
+
+            local parent = safeMethod(self, "getParent")
+            if parent ~= owner then
+                if parent and parent.removeChild then
+                    parent:removeChild(self)
+                elseif self.detachFromParent then
+                    self:detachFromParent()
+                end
+                owner:addChild(self)
+            end
         end
+        self:setVisible(true)
     else
         self:setVisible(false)
-        if self.__managed and self.removeFromUIManager then
-            self:removeFromUIManager()
-            self.__managed = false
-        end
     end
     self:_syncVisibility()
 end
@@ -664,8 +677,12 @@ function Controller:position()
         plateY = math.max(screenTop, math.min(plateY, screenTop + screenHeight - plateHeight))
     end
 
-    self:setX(plateX - (self.__plateX or 0))
-    self:setY(plateY - (self.__plateY or 0))
+    -- The controller is a dashboard child, so translate the screen-space plate
+    -- coordinates back into the dashboard's local coordinate space.
+    local ownerX = safeMethod(owner, "getAbsoluteX") or safeMethod(owner, "getX") or 0
+    local ownerY = safeMethod(owner, "getAbsoluteY") or safeMethod(owner, "getY") or 0
+    self:setX(plateX - ownerX - (self.__plateX or 0))
+    self:setY(plateY - ownerY - (self.__plateY or 0))
 end
 
 function ELC.Ensure(owner)
@@ -673,6 +690,7 @@ function ELC.Ensure(owner)
     local controller = owner.__YourDashEmergencyLightController
     if controller then
         controller.owner = owner
+        if controller.setAlwaysOnTop then controller:setAlwaysOnTop(false) end
         if controller:_loadTextures() then controller:_build() end
         return controller
     end
@@ -680,7 +698,7 @@ function ELC.Ensure(owner)
     controller = Controller:new(owner)
     controller:initialise()
     controller:instantiate()
-    if controller.setAlwaysOnTop then controller:setAlwaysOnTop(true) end
+    if controller.setAlwaysOnTop then controller:setAlwaysOnTop(false) end
     owner.__YourDashEmergencyLightController = controller
     if controller:_loadTextures() then controller:_build() end
     return controller
